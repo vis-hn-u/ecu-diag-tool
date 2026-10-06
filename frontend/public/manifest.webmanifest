@@ -1,0 +1,20 @@
+{
+  "name": "Automotive CAN / ECU Engineering Platform",
+  "short_name": "CAN Platform",
+  "description": "Offline-First Automotive CAN Bus Analyzer, DBC Decoder & Network Topology Workstation",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0B0F17",
+  "theme_color": "#0B0F17",
+  "categories": ["utilities", "engineering", "productivity"],
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

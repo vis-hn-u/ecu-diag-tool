@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <linearGradient id="favBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#0B132B" />
+      <stop offset="100%" stopColor="#050811" />
+    </linearGradient>
+    <linearGradient id="favCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stopColor="#00F0FF" />
+      <stop offset="100%" stopColor="#0284C7" />
+    </linearGradient>
+    <linearGradient id="favAmber" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stopColor="#F59E0B" />
+      <stop offset="100%" stopColor="#EF4444" />
+    </linearGradient>
+  </defs>
+
+  <!-- Base Rounded Shield -->
+  <rect width="100" height="100" rx="22" fill="url(#favBg)" stroke="#0284C7" stroke-width="3"/>
+
+  <!-- Telemetry / Tachometer Sweep Arc -->
+  <path d="M 22 68 A 33 33 0 1 1 78 68" fill="none" stroke="#1E293B" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 22 68 A 33 33 0 0 1 50 17" fill="none" stroke="url(#favCyan)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M 50 17 A 33 33 0 0 1 74 58" fill="none" stroke="url(#favAmber)" stroke-width="7" stroke-linecap="round"/>
+
+  <!-- Instrument Center Hub & Needle -->
+  <circle cx="50" cy="46" r="7.5" fill="#00F0FF"/>
+  <line x1="50" y1="46" x2="67" y2="28" stroke="#F59E0B" stroke-width="4.5" stroke-linecap="round"/>
+
+  <!-- Differential High/Low CAN Bus Signal Waves -->
+  <!-- CAN_H (High Level) -->
+  <path d="M 14 80 L 32 80 L 39 71 L 55 71 L 62 80 L 86 80" fill="none" stroke="#00F0FF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- CAN_L (Complementary Low Level) -->
+  <path d="M 14 89 L 32 89 L 39 96 L 55 96 L 62 89 L 86 89" fill="none" stroke="#38BDF8" stroke-width="3" stroke-opacity="0.75" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,10 @@
+{
+  "name": "can-engineering-platform-root",
+  "version": "5.0.0",
+  "description": "Automotive CAN / ECU Engineering, Diagnostics & Flash Analysis Platform",
+  "scripts": {
+    "start": "powershell -ExecutionPolicy Bypass -File ./start.ps1",
+    "build": "cd frontend && npm run build && cd ../backend && dotnet build CanEngineeringPlatform.sln",
+    "test": "cd backend && dotnet test CanEngineeringPlatform.sln"
+  }
+}
