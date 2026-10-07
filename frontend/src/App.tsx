@@ -21,6 +21,7 @@ import { HardwareManagerPage } from './pages/HardwareManagerPage';
 import { MappackViewerPage } from './pages/MappackViewerPage';
 import { ReportsPage } from './pages/ReportsPage';
 import { EcuEngineeringPage } from './pages/EcuEngineeringPage';
+import { SavvyCanAnalysisPage } from './pages/SavvyCanAnalysisPage';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
@@ -44,6 +45,7 @@ export const AppContent: React.FC = () => {
           {activeTab === 'ecu-engineering' && <EcuEngineeringPage />}
           {activeTab === 'reports' && <ReportsPage />}
           {activeTab === 'hardware' && <HardwareManagerPage />}
+          {activeTab === 'savvycan' && <SavvyCanAnalysisPage />}
           {activeTab === 'analyzer' && <CanAnalyzerPage />}
           {activeTab === 'live-ecu-data' && <LiveEcuDataPage />}
           {activeTab === 'livedata' && <LiveDataPage onNavigateToGraphs={handleNavigateToGraphs} />}

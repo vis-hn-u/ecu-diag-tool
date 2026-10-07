@@ -32,6 +32,12 @@ public class ConfigureTransportRequest
     public string? GatewayAddress { get; set; }
     public string? PortName { get; set; }
     public int? SerialBaudRate { get; set; }
+    public bool? ListenOnly { get; set; }
+}
+
+public class GvretListenOnlyRequest
+{
+    public bool ListenOnly { get; set; } = true;
 }
 
 public class ElmCommandRequest
@@ -101,6 +107,28 @@ public class HardwareController : ControllerBase
     {
         var ports = CanEngineeringPlatform.Core.Hardware.Transports.Elm327Transport.GetAvailablePorts();
         return Ok(ports);
+    }
+
+    [HttpGet("gvret/ports")]
+    public ActionResult<IEnumerable<string>> GetGvretPorts()
+    {
+        var ports = CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.GetAvailablePorts();
+        return Ok(ports);
+    }
+
+    [HttpPost("gvret/listen-only")]
+    public ActionResult SetGvretListenOnly([FromBody] GvretListenOnlyRequest request)
+    {
+        var transport = _hardwareManager.GetTransport(CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.TransportIdentifier)
+                     ?? _hardwareManager.GetAllTransports().FirstOrDefault(t => t is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport);
+
+        if (transport is not CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
+        {
+            return NotFound("GVRET transport is not registered");
+        }
+
+        gvret.SetListenOnly(request.ListenOnly);
+        return Ok(gvret.GetStatus());
     }
 
     [HttpPost("elm327/command")]
@@ -210,6 +238,13 @@ public class HardwareController : ControllerBase
             {
                 usbEsp.Configure(request.PortName);
             }
+        }
+        else if (transport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
+        {
+            uint speed = request.NominalBaudRate.GetValueOrDefault(500000u);
+            int uartBaud = request.SerialBaudRate.GetValueOrDefault(115200);
+            bool listen = request.ListenOnly.GetValueOrDefault(true);
+            gvret.Configure(request.PortName ?? "COM8", speed, listen, uartBaud);
         }
 
         return Ok(transport.GetStatus());

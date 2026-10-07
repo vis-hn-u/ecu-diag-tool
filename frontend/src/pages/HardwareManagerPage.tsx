@@ -58,6 +58,15 @@ export const HardwareManagerPage: React.FC = () => {
   const [elmCmdResult, setElmCmdResult] = useState<string | null>(null);
   const [executingCmd, setExecutingCmd] = useState(false);
 
+  // Arduino Nano GVRET transport state
+  const [gvretPort, setGvretPort] = useState<string>('COM8');
+  const [gvretPorts, setGvretPorts] = useState<string[]>(['COM8']);
+  const [loadingGvretPorts, setLoadingGvretPorts] = useState(false);
+  const [gvretBusSpeed, setGvretBusSpeed] = useState<number>(500000);
+  const [gvretUartBaud, setGvretUartBaud] = useState<number>(115200);
+  const [gvretListenOnly, setGvretListenOnly] = useState<boolean>(true);
+  const [savingGvret, setSavingGvret] = useState(false);
+
   // Test transmit state
   const [testId, setTestId] = useState<string>('7DF');
   const [testPayload, setTestPayload] = useState<string>('02 01 00 00 00 00 00 00');
@@ -96,9 +105,44 @@ export const HardwareManagerPage: React.FC = () => {
     }
   };
 
+  const loadGvretPorts = async () => {
+    setLoadingGvretPorts(true);
+    try {
+      const ports = await api.getGvretPorts();
+      if (Array.isArray(ports) && ports.length > 0) {
+        setGvretPorts(ports);
+        if (!gvretPort) setGvretPort(ports[0]);
+      }
+    } catch {
+      // Fallback
+    } finally {
+      setLoadingGvretPorts(false);
+    }
+  };
+
+  const handleSaveGvretConfig = async () => {
+    setSavingGvret(true);
+    try {
+      await configureTransport({
+        transportId: 'arduino-nano-gvret',
+        portName: gvretPort,
+        nominalBaudRate: gvretBusSpeed,
+        serialBaudRate: gvretUartBaud
+      });
+      await api.setGvretListenOnly(gvretListenOnly);
+      setSwitchMessage('Arduino Nano GVRET parameters applied');
+    } catch {
+      setSwitchMessage('Failed to configure GVRET parameters');
+    } finally {
+      setSavingGvret(false);
+      setTimeout(() => setSwitchMessage(null), 4000);
+    }
+  };
+
   useEffect(() => {
     loadElmPorts();
     loadEspUsbPorts();
+    loadGvretPorts();
   }, []);
 
   const isWaveshareId = (id?: string | null) => id === 'waveshare-canfd-b' || id === 'waveshare-usb-can-fd';
@@ -107,6 +151,7 @@ export const HardwareManagerPage: React.FC = () => {
     if (isWaveshareId(transportId)) return Usb;
     if (transportId === 'esp8266-gateway') return Wifi;
     if (transportId === 'esp8266-usb-serial') return Usb;
+    if (transportId === 'arduino-nano-gvret') return Cpu;
     if (transportId === 'virtual-simulation') return HardDrive;
     if (transportId === 'elm327-adapter') return Radio;
     return Cpu;
@@ -126,6 +171,10 @@ export const HardwareManagerPage: React.FC = () => {
       } else if (hardwareStatus.transportId === 'esp8266-usb-serial' && hardwareStatus.extendedTelemetry) {
         const t = hardwareStatus.extendedTelemetry as any;
         if (t.comPort && t.comPort !== 'None') setEspUsbPort(t.comPort);
+      } else if (hardwareStatus.transportId === 'arduino-nano-gvret' && hardwareStatus.extendedTelemetry) {
+        const t = hardwareStatus.extendedTelemetry as any;
+        if (t.comPort && t.comPort !== 'None') setGvretPort(t.comPort);
+        if (t.listenOnly !== undefined) setGvretListenOnly(t.listenOnly);
       } else if (hardwareStatus.transportId === 'elm327-adapter' && hardwareStatus.extendedTelemetry) {
         const t = hardwareStatus.extendedTelemetry as any;
         if (t.portName) setElmPort(t.portName);
@@ -1230,6 +1279,204 @@ export const HardwareManagerPage: React.FC = () => {
               <>
                 <Zap className="w-4 h-4" />
                 <span>CONNECT / ACTIVATE ELM327 BLUETOOTH</span>
+              </>
+            )}
+          </button>
+        </div>
+
+        {/* Card 5: Arduino Nano + MCP2515 (GVRET / SavvyCAN) */}
+        <div className={`bg-can-panel border rounded-lg p-4 shadow-lg flex flex-col justify-between transition-all ${
+          activeTransportId === 'arduino-nano-gvret'
+            ? 'border-indigo-500/60 shadow-indigo-950/40 bg-gradient-to-b from-indigo-950/10 to-can-panel ring-1 ring-indigo-500/30'
+            : 'border-can-border'
+        }`}>
+          <div>
+            {/* Top Bar */}
+            <div className="flex items-start justify-between border-b border-can-border pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Cpu className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white font-sans">Arduino Nano + MCP2515</h2>
+                  <span className="text-[10px] text-slate-400">GVRET Binary Protocol (SavvyCAN Native)</span>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-1.5">
+                <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
+                  GVRET
+                </span>
+                {activeTransportId === 'arduino-nano-gvret' ? (
+                  <span className="flex items-center space-x-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                    <CheckCircle2 className="w-3 h-3" />
+                    <span>ACTIVE</span>
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-can-border">
+                    STANDBY
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {/* Capabilities Matrix */}
+            <div className="my-3 space-y-1.5">
+              <div className="text-[10px] text-slate-500 uppercase font-semibold">Reported Hardware Capabilities</div>
+              <div className="flex flex-wrap gap-1">
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-slate-700 text-slate-300 border border-slate-600 font-bold">
+                  CAN1 (Channel 0)
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-bold">
+                  Classic CAN (0-8B)
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 font-bold">
+                  8 MHz Crystal
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-sky-500/15 text-sky-300 border border-sky-500/30 font-bold">
+                  115200 Baud 8N1
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
+                  Hardware Listen-Only
+                </span>
+              </div>
+            </div>
+
+            {/* Configuration Form */}
+            <div className="my-3 p-2.5 bg-slate-900/60 rounded border border-slate-800 space-y-2.5">
+              <div className="text-[10px] text-slate-400 uppercase font-bold">GVRET Hardware Configuration</div>
+
+              {/* Port selector */}
+              <div>
+                <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
+                  <span>Serial COM Port:</span>
+                  <button type="button" onClick={loadGvretPorts} disabled={loadingGvretPorts} className="text-sky-400 hover:underline">
+                    {loadingGvretPorts ? 'Scanning...' : 'Refresh Ports'}
+                  </button>
+                </div>
+                <div className="flex space-x-1.5">
+                  <select
+                    value={gvretPort}
+                    onChange={e => setGvretPort(e.target.value)}
+                    className="flex-1 bg-can-card border border-can-border rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                  >
+                    {gvretPorts.map(p => (
+                      <option key={p} value={p}>{p}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* CAN Bus Bitrate */}
+              <div>
+                <label className="text-slate-400 text-[10px] block mb-1">CAN Bitrate (F1 05 Setup):</label>
+                <select
+                  value={gvretBusSpeed}
+                  onChange={e => setGvretBusSpeed(parseInt(e.target.value, 10))}
+                  className="w-full bg-can-card border border-can-border rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                >
+                  <option value={125000}>125 kbps (Low-speed CAN)</option>
+                  <option value={250000}>250 kbps (Medium / J1939)</option>
+                  <option value={500000}>500 kbps (Automotive OBD-II standard)</option>
+                  <option value={1000000}>1000 kbps (1 Mbps High-speed)</option>
+                </select>
+              </div>
+
+              {/* UART Baud */}
+              <div>
+                <label className="text-slate-400 text-[10px] block mb-1">UART Baud Rate (Nano Serial):</label>
+                <select
+                  value={gvretUartBaud}
+                  onChange={e => setGvretUartBaud(parseInt(e.target.value, 10))}
+                  className="w-full bg-can-card border border-can-border rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
+                >
+                  <option value={115200}>115,200 baud (Actual Nano GVRET UART)</option>
+                  <option value={57600}>57,600 baud</option>
+                  <option value={230400}>230,400 baud</option>
+                  <option value={500000}>500,000 baud</option>
+                  <option value={1000000}>1,000,000 baud</option>
+                </select>
+              </div>
+
+              {/* Hardware Listen-Only Toggle */}
+              <div className="p-2 bg-slate-950/70 rounded border border-slate-800 space-y-1">
+                <label className="flex items-center justify-between text-xs cursor-pointer select-none">
+                  <span className="text-slate-300 font-semibold">Hardware Listen-Only:</span>
+                  <input
+                    type="checkbox"
+                    checked={gvretListenOnly}
+                    onChange={e => setGvretListenOnly(e.target.checked)}
+                    className="rounded text-indigo-500"
+                  />
+                </label>
+                <p className="text-[10px] text-slate-500">
+                  {gvretListenOnly
+                    ? 'MCP2515 hardware is silent (no ACKs/Tx). Safe for in-vehicle tap.'
+                    : 'MCP2515 normal mode (transmissions permitted, ACKs driven).'}
+                </p>
+              </div>
+
+              {/* Save Button */}
+              <button
+                type="button"
+                onClick={handleSaveGvretConfig}
+                disabled={savingGvret}
+                className="w-full py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 border border-can-border font-medium text-[11px] transition-colors"
+              >
+                {savingGvret ? 'Applying...' : 'Apply GVRET Hardware Settings'}
+              </button>
+            </div>
+
+            {/* Live Telemetry (When Active) */}
+            {activeTransportId === 'arduino-nano-gvret' && hardwareStatus?.extendedTelemetry && (
+              <div className="my-2 p-2 bg-slate-900/80 rounded border border-indigo-500/30 space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Keepalive State:</span>
+                  <span className={`font-bold ${(hardwareStatus.extendedTelemetry as any).isKeepaliveValidated ? 'text-emerald-400' : 'text-amber-400'}`}>
+                    {(hardwareStatus.extendedTelemetry as any).isKeepaliveValidated ? 'VALIDATED (0xDEAD)' : 'PENDING'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Firmware Build:</span>
+                  <span className="text-slate-200 font-mono">
+                    Build {(hardwareStatus.extendedTelemetry as any).firmwareBuild || '500'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">RX Frames / Rate:</span>
+                  <span className="text-slate-200 font-mono">
+                    {(hardwareStatus.extendedTelemetry as any).rxFrameCount ?? hardwareStatus.totalFramesReceived} ({hardwareStatus.rxFrameRate} fps)
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">TX Frames:</span>
+                  <span className="text-slate-200 font-mono">
+                    {(hardwareStatus.extendedTelemetry as any).txFrameCount ?? hardwareStatus.totalFramesTransmitted}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Activate Button */}
+          <button
+            onClick={() => handleSelectAdapter('arduino-nano-gvret')}
+            disabled={isSwitching || activeTransportId === 'arduino-nano-gvret'}
+            className={`w-full py-2 rounded font-bold transition-all text-xs flex items-center justify-center space-x-2 ${
+              activeTransportId === 'arduino-nano-gvret'
+                ? 'bg-emerald-600/20 text-emerald-400 border border-emerald-500/40 cursor-default'
+                : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400 shadow-md'
+            }`}
+          >
+            {activeTransportId === 'arduino-nano-gvret' ? (
+              <>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>ACTIVE ADAPTER</span>
+              </>
+            ) : (
+              <>
+                <Zap className="w-4 h-4" />
+                <span>CONNECT / ACTIVATE ARDUINO NANO GVRET</span>
               </>
             )}
           </button>

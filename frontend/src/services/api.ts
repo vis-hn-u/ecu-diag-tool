@@ -137,6 +137,23 @@ export const FALLBACK_HARDWARE_TRANSPORTS: HardwareTransportInfo[] = [
       supportedNominalBaudRates: [500000],
       supportedDataBaudRates: []
     }
+  },
+  {
+    transportId: 'arduino-nano-gvret',
+    name: 'Arduino Nano + MCP2515 (GVRET / SavvyCAN)',
+    type: 'GvretSerial',
+    isConnected: false,
+    capabilities: {
+      channelCount: 1,
+      supportsCanFd: false,
+      supportsBitRateSwitch: false,
+      supportsClassicCan: true,
+      supportsTransmit: true,
+      maxPayloadBytes: 8,
+      supportsHardwareTimestamps: true,
+      supportedNominalBaudRates: [125000, 250000, 500000, 1000000],
+      supportedDataBaudRates: []
+    }
   }
 ];
 
@@ -221,6 +238,28 @@ export const api = {
       return await res.json();
     } catch {
       return [];
+    }
+  },
+  getGvretPorts: async (): Promise<string[]> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/gvret/ports`);
+      if (!res.ok) return ['COM8'];
+      const data = await res.json();
+      return data.length > 0 ? data : ['COM8'];
+    } catch {
+      return ['COM8'];
+    }
+  },
+  setGvretListenOnly: async (listenOnly: boolean): Promise<any> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/gvret/listen-only`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ listenOnly })
+      });
+      return await res.json();
+    } catch {
+      return null;
     }
   },
 

@@ -10,7 +10,8 @@ public enum TransportType
     WaveshareCanFd,
     Simulation,
     Elm327,
-    Esp8266UsbSerial
+    Esp8266UsbSerial,
+    GvretSerial
 }
 
 public class HardwareCapabilities : IAutomotiveCapabilities

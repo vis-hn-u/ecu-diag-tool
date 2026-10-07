@@ -93,6 +93,7 @@ builder.Services.AddSingleton<WaveshareCanFdTransport>();
 builder.Services.AddSingleton<SimulationTransport>();
 builder.Services.AddSingleton<Elm327Transport>();
 builder.Services.AddSingleton<Esp8266UsbSerialTransport>();
+builder.Services.AddSingleton<GvretSerialTransport>();
 builder.Services.AddSingleton<IHardwareManager>(sp =>
 {
     var pipeline = sp.GetRequiredService<ICanPipeline>();
@@ -101,7 +102,8 @@ builder.Services.AddSingleton<IHardwareManager>(sp =>
     var sim = sp.GetRequiredService<SimulationTransport>();
     var elm = sp.GetRequiredService<Elm327Transport>();
     var usbEsp = sp.GetRequiredService<Esp8266UsbSerialTransport>();
-    return new HardwareManager(pipeline, new ICanTransport[] { usbEsp, ws, sim, elm, esp });
+    var gvret = sp.GetRequiredService<GvretSerialTransport>();
+    return new HardwareManager(pipeline, new ICanTransport[] { gvret, usbEsp, ws, sim, elm, esp });
 });
 
 // Register Diagnostic Services (Phase 3)

@@ -37,6 +37,7 @@ export type TabType =
   | 'flash-analyzer'
   | 'mappacks'
   | 'ecu-engineering'
+  | 'savvycan'
   | 'reports';
 
 interface SidebarProps {
@@ -50,6 +51,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, onSelectTab }) => {
     { id: 'ecu-engineering', label: 'ECU Engineering', icon: Cpu },
     { id: 'reports', label: 'PDF Reports Center', icon: FileText },
     { id: 'hardware', label: 'Hardware Manager', icon: HardDrive },
+    { id: 'savvycan', label: 'SavvyCAN Studio', icon: Binary },
     { id: 'analyzer', label: 'CAN Analyzer', icon: Binary },
     { id: 'live-ecu-data', label: 'Live ECU Data', icon: Activity },
     { id: 'livedata', label: 'DBC Signals', icon: Gauge },

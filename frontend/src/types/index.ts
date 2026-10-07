@@ -15,7 +15,7 @@ export interface CanFrame {
   actualLength?: number;
 }
 
-export type TransportType = 'Esp8266' | 'WaveshareCanFd' | 'Simulation' | 'Elm327' | 'Esp8266UsbSerial' | number;
+export type TransportType = 'Esp8266' | 'WaveshareCanFd' | 'Simulation' | 'Elm327' | 'Esp8266UsbSerial' | 'GvretSerial' | number;
 
 export interface HardwareCapabilities {
   supportsCanFd: boolean;
