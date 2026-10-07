@@ -81,4 +81,35 @@ public class BenchHardwareTests
         Assert.False(transport.IsConnected);
         _output.WriteLine("[BENCH] Reopened port closed cleanly. Full lifecycle verified!");
     }
+
+    [Fact]
+    public async Task LiveHardwareBenchValidation_COM13_Esp8266()
+    {
+        var ports = Esp8266UsbSerialTransport.GetAvailablePorts();
+        _output.WriteLine($"[ESP BENCH] Available Ports: {string.Join(", ", ports)}");
+        Assert.Contains("COM13", ports);
+
+        var transport = new Esp8266UsbSerialTransport();
+        transport.Configure("COM13");
+
+        bool connected = await transport.ConnectAsync();
+        _output.WriteLine($"[ESP BENCH] Initial Connect Result: {connected}");
+        Assert.True(connected, "Failed to open COM13");
+        Assert.True(transport.GetStatus().IsConnected);
+
+        await Task.Delay(2000);
+
+        var status = transport.GetStatus();
+        dynamic tele = status.ExtendedTelemetry!;
+        _output.WriteLine($"[ESP BENCH] ComPort: {tele.ComPort}");
+        _output.WriteLine($"[ESP BENCH] BaudRate: {tele.BaudRate}");
+        _output.WriteLine($"[ESP BENCH] GatewayIdentified: {tele.IsGatewayIdentified}");
+        _output.WriteLine($"[ESP BENCH] RxFrameCount: {tele.RxFrameCount}");
+        _output.WriteLine($"[ESP BENCH] DroppedFrames: {tele.DroppedFrames}");
+        _output.WriteLine($"[ESP BENCH] SerialErrors: {tele.SerialErrors}");
+
+        await transport.DisconnectAsync();
+        Assert.False(transport.GetStatus().IsConnected);
+        _output.WriteLine("[ESP BENCH] Disconnected cleanly.");
+    }
 }
