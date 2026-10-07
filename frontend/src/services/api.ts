@@ -202,6 +202,7 @@ export const api = {
     gatewayAddress?: string;
     portName?: string;
     serialBaudRate?: number;
+    listenOnly?: boolean;
   }): Promise<HardwareStatus> => {
     const res = await fetch(`${API_BASE}/hardware/configure`, {
       method: 'POST',

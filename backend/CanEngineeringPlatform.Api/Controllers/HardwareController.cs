@@ -242,7 +242,7 @@ public class HardwareController : ControllerBase
         else if (transport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
         {
             uint speed = request.NominalBaudRate.GetValueOrDefault(500000u);
-            int uartBaud = request.SerialBaudRate.GetValueOrDefault(115200);
+            int uartBaud = request.SerialBaudRate.GetValueOrDefault(1000000);
             bool listen = request.ListenOnly.GetValueOrDefault(true);
             gvret.Configure(request.PortName ?? "COM8", speed, listen, uartBaud);
         }

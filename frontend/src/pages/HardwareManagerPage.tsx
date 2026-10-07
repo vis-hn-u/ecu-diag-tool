@@ -63,7 +63,7 @@ export const HardwareManagerPage: React.FC = () => {
   const [gvretPorts, setGvretPorts] = useState<string[]>(['COM8']);
   const [loadingGvretPorts, setLoadingGvretPorts] = useState(false);
   const [gvretBusSpeed, setGvretBusSpeed] = useState<number>(500000);
-  const [gvretUartBaud, setGvretUartBaud] = useState<number>(115200);
+  const [gvretUartBaud, setGvretUartBaud] = useState<number>(1000000);
   const [gvretListenOnly, setGvretListenOnly] = useState<boolean>(true);
   const [savingGvret, setSavingGvret] = useState(false);
 
@@ -127,7 +127,8 @@ export const HardwareManagerPage: React.FC = () => {
         transportId: 'arduino-nano-gvret',
         portName: gvretPort,
         nominalBaudRate: gvretBusSpeed,
-        serialBaudRate: gvretUartBaud
+        serialBaudRate: gvretUartBaud,
+        listenOnly: gvretListenOnly
       });
       await api.setGvretListenOnly(gvretListenOnly);
       setSwitchMessage('Arduino Nano GVRET parameters applied');
@@ -1390,11 +1391,11 @@ export const HardwareManagerPage: React.FC = () => {
                   onChange={e => setGvretUartBaud(parseInt(e.target.value, 10))}
                   className="w-full bg-can-card border border-can-border rounded px-2 py-1 text-slate-200 focus:outline-none focus:border-indigo-500 font-mono text-xs"
                 >
-                  <option value={115200}>115,200 baud (Actual Nano GVRET UART)</option>
+                  <option value={1000000}>1,000,000 baud (Nano GVRET Firmware Default)</option>
+                  <option value={115200}>115,200 baud</option>
                   <option value={57600}>57,600 baud</option>
                   <option value={230400}>230,400 baud</option>
                   <option value={500000}>500,000 baud</option>
-                  <option value={1000000}>1,000,000 baud</option>
                 </select>
               </div>
 

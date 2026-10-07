@@ -13,7 +13,7 @@ namespace CanEngineeringPlatform.Core.Hardware.Transports;
 public class GvretSerialTransport : ICanTransport
 {
     public const string TransportIdentifier = "arduino-nano-gvret";
-    public const int DefaultUartBaud = 115200;
+    public const int DefaultUartBaud = 1000000;
     public const uint DefaultCanBusSpeed = 500000u;
 
     // GVRET Protocol Command Constants (from SavvyCAN connections/gvretserial.h)
@@ -79,6 +79,7 @@ public class GvretSerialTransport : ICanTransport
     private readonly object _lock = new object();
     private SerialPort? _serialPort;
     private Task? _readTask;
+    private Task? _keepaliveTask;
 
     // Byte-level protocol parser state machine
     internal enum RxState
@@ -233,6 +234,7 @@ public class GvretSerialTransport : ICanTransport
                 ApplyHardwareBusConfig();
 
                 _readTask = Task.Run(() => ReadLoopAsync(_cts.Token));
+                _keepaliveTask = Task.Run(() => KeepaliveLoopAsync(_cts.Token));
                 NotifyStatusChanged();
                 return Task.FromResult(true);
             }
@@ -598,6 +600,46 @@ public class GvretSerialTransport : ICanTransport
         NotifyStatusChanged();
     }
 
+    private async Task KeepaliveLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(1000, token);
+                if (!IsConnected) break;
+
+                lock (_lock)
+                {
+                    if (_serialPort != null && _serialPort.IsOpen)
+                    {
+                        if (!_deviceIdentified)
+                        {
+                            // Nano may have been in bootloader on initial connect; retry handshake
+                            byte[] handshake = BuildHandshakePacket();
+                            _serialPort.Write(handshake, 0, handshake.Length);
+                            _lastHandshakeUtc = DateTime.UtcNow;
+                        }
+                        else
+                        {
+                            // Send periodic SavvyCAN keepalive heartbeat
+                            byte[] keepalive = new byte[] { 0xF1, ProtoKeepalive };
+                            _serialPort.Write(keepalive, 0, keepalive.Length);
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                _lastError = $"Keepalive error: {ex.Message}";
+            }
+        }
+    }
+
     /// <summary>
     /// Byte-level state machine parser for inbound GVRET bytes.
     /// Matches SavvyCAN connections/gvretserial.cpp procRXChar() logic.
@@ -719,6 +761,7 @@ public class GvretSerialTransport : ICanTransport
                     _lastHeartbeatUtc = DateTime.UtcNow;
                     _rxState = RxState.Idle;
                     _rxStep = 0;
+                    NotifyStatusChanged();
                 }
                 break;
 
@@ -732,6 +775,7 @@ public class GvretSerialTransport : ICanTransport
                     _deviceIdentified = true;
                     _rxState = RxState.Idle;
                     _rxStep = 0;
+                    NotifyStatusChanged();
                 }
                 break;
 

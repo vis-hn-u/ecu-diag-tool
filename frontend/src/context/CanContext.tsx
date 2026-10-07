@@ -23,6 +23,7 @@ interface CanContextType {
     gatewayAddress?: string;
     portName?: string;
     serialBaudRate?: number;
+    listenOnly?: boolean;
   }) => Promise<boolean>;
   refreshHardwareStatus: () => Promise<void>;
   replayStatus: ReplayStatus | null;

@@ -457,7 +457,7 @@ public class GvretSerialTransportTests
         Assert.Equal("arduino-nano-gvret", status.TransportId);
         Assert.NotNull(status.ExtendedTelemetry);
         dynamic tele = status.ExtendedTelemetry!;
-        Assert.Equal(115200, (int)tele.BaudRate);
+        Assert.Equal(1000000, (int)tele.BaudRate);
         Assert.Equal("500 kbps", (string)tele.BusSpeed);
         Assert.True((bool)tele.ListenOnly);
         Assert.Equal("LISTEN ONLY (SILENT)", (string)tele.OperatingMode);
