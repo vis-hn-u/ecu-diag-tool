@@ -27,6 +27,7 @@ public interface IDiagnosticSessionService
     Task<DiagnosticExchange> SendRequestAsync(uint requestCanId, byte[] payload, string ecuName = "ECM", bool isSimulation = true);
     Task ScanAllDtcsAsync(bool isSimulation = true);
     Task ClearDtcsAsync(uint requestCanId, string ecuName = "ECM", bool isSimulation = true);
+    Task<DtcClearVerificationResult> ClearAndVerifyDtcsAsync(uint requestCanId, string ecuName = "ECM", bool isSimulation = true);
     void ClearHistory();
     event Action<DiagnosticExchange>? OnExchangeUpdated;
     event Action<IReadOnlyList<DiagnosticTroubleCode>>? OnDtcsUpdated;
@@ -299,32 +300,129 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
         return exchange;
     }
 
+    public async Task<DtcClearVerificationResult> ClearAndVerifyDtcsAsync(uint requestCanId, string ecuName = "ECM", bool isSimulation = true)
+    {
+        // 1. Snapshot Pre-Clear State
+        var preClearList = _activeDtcs.Values
+            .Where(d => string.Equals(d.EcuName, ecuName, StringComparison.OrdinalIgnoreCase) || ecuName == "Broadcast" || requestCanId == 0x7DF)
+            .ToList();
+
+        var result = new DtcClearVerificationResult
+        {
+            EcuName = ecuName,
+            RequestCanId = requestCanId,
+            PreClearDtcCount = preClearList.Count,
+            PreClearCodes = preClearList.Select(d => d.Code).Distinct().ToList(),
+            TimestampUtc = DateTime.UtcNow
+        };
+
+        // 2. Transmit UDS 0x14 0xFF 0xFF 0xFF (ClearDiagnosticInformation)
+        byte[] udsClearPayload = new byte[] { 0x14, 0xFF, 0xFF, 0xFF };
+        var udsExchange = await SendRequestAsync(requestCanId, udsClearPayload, ecuName, isSimulation);
+
+        int waitClear = 0;
+        while (!udsExchange.IsComplete && waitClear < 600)
+        {
+            await Task.Delay(15);
+            waitClear += 15;
+        }
+
+        result.RawClearResponseHex = udsExchange.ResponseDataHex;
+
+        // Check for Negative Response Codes (NRC)
+        if (!string.IsNullOrEmpty(udsExchange.NrcHex))
+        {
+            if (udsExchange.NrcHex.Contains("22")) // ConditionsNotCorrect
+            {
+                result.Status = DtcClearStatus.ConditionsNotCorrect;
+                result.Message = "ECU rejected clear: Vehicle conditions not correct (ensure engine is stopped and ignition is ON).";
+                return result;
+            }
+            if (udsExchange.NrcHex.Contains("33")) // SecurityAccessDenied
+            {
+                result.Status = DtcClearStatus.SecurityRequired;
+                result.Message = "ECU rejected clear: Security Access (0x27) authorization required.";
+                return result;
+            }
+            if (udsExchange.NrcHex.Contains("11") || udsExchange.NrcHex.Contains("12")) // Service/Subfunction not supported
+            {
+                result.Status = DtcClearStatus.NotSupported;
+                result.Message = "ECU rejected clear: Service 0x14 not supported by target controller.";
+                return result;
+            }
+            if (udsExchange.NrcHex.Contains("7E") || udsExchange.NrcHex.Contains("7F"))
+            {
+                result.Status = DtcClearStatus.SessionRequired;
+                result.Message = "ECU rejected clear: Extended diagnostic session (0x10 0x03) required.";
+                return result;
+            }
+            result.Status = DtcClearStatus.Refused;
+            result.Message = $"ECU rejected clear: NRC {udsExchange.NrcHex} ({udsExchange.NrcDescription ?? "Negative Response"}).";
+            return result;
+        }
+
+        if (!udsExchange.IsComplete || !udsExchange.IsSuccess)
+        {
+            result.Status = DtcClearStatus.Timeout;
+            result.Message = "No positive response received from ECU within timeout window.";
+            return result;
+        }
+
+        // Also issue OBD Mode 04 if standard OBD addressing
+        if (requestCanId == 0x7E0 || requestCanId == 0x7DF)
+        {
+            byte[] obdClearPayload = new byte[] { 0x04 };
+            await SendRequestAsync(0x7DF, obdClearPayload, ecuName, isSimulation);
+        }
+
+        // 3. Post-Clear Re-Read & Validation Scan
+        await Task.Delay(50);
+        var postScanExchange = await SendRequestAsync(requestCanId, new byte[] { 0x19, 0x02, 0xFF }, ecuName, isSimulation);
+        int waitPostScan = 0;
+        while (!postScanExchange.IsComplete && waitPostScan < 600)
+        {
+            await Task.Delay(15);
+            waitPostScan += 15;
+        }
+
+        // 4. Compare post-clear active list
+        var postClearRemaining = _activeDtcs.Values
+            .Where(d => string.Equals(d.EcuName, ecuName, StringComparison.OrdinalIgnoreCase) || ecuName == "Broadcast" || requestCanId == 0x7DF)
+            .ToList();
+
+        result.PostClearDtcCount = postClearRemaining.Count;
+        result.PostClearRemainingCodes = postClearRemaining.Select(d => d.Code).Distinct().ToList();
+
+        if (postClearRemaining.Count == 0)
+        {
+            result.Status = DtcClearStatus.Cleared;
+            result.Message = $"Successfully cleared and verified {result.PreClearDtcCount} DTC(s) on {ecuName}.";
+        }
+        else
+        {
+            result.Status = DtcClearStatus.StillPresent;
+            result.Message = $"Clear command acknowledged, but {postClearRemaining.Count} fault code(s) remain active or re-triggered immediately.";
+        }
+
+        OnDtcsUpdated?.Invoke(GetActiveDtcList());
+        return result;
+    }
+
     public async Task ClearDtcsAsync(uint requestCanId, string ecuName = "ECM", bool isSimulation = true)
     {
-        // 1. Send UDS 0x14 0xFF 0xFF 0xFF (Clear all emission and non-emission DTC groups)
-        byte[] udsClearPayload = new byte[] { 0x14, 0xFF, 0xFF, 0xFF };
-        await SendRequestAsync(requestCanId, udsClearPayload, ecuName, isSimulation);
-
-        // 2. Also send OBD-II Mode 04 (Clear DTCs & Freeze Frames)
-        byte[] obdClearPayload = new byte[] { 0x04 };
-        await SendRequestAsync(requestCanId == 0x7E0 ? 0x7DF : requestCanId, obdClearPayload, ecuName, isSimulation);
-
-        // 3. Purge from internal active DTCs dictionary for target ECU (or all if broadcast)
-        foreach (var key in _activeDtcs.Keys.ToList())
-        {
-            if (string.Equals(_activeDtcs[key].EcuName, ecuName, StringComparison.OrdinalIgnoreCase) ||
-                ecuName == "Broadcast" || requestCanId == 0x7DF)
-            {
-                _activeDtcs.TryRemove(key, out _);
-            }
-        }
-        OnDtcsUpdated?.Invoke(GetActiveDtcList());
+        await ClearAndVerifyDtcsAsync(requestCanId, ecuName, isSimulation);
     }
 
     public async Task ScanAllDtcsAsync(bool isSimulation = true)
     {
         // 1. Scan ECM via UDS 0x19 0x02 0xFF (ReadDTCInformation by status mask)
-        await SendRequestAsync(0x7E0, new byte[] { 0x19, 0x02, 0xFF }, "ECM", isSimulation);
+        var exEcm = await SendRequestAsync(0x7E0, new byte[] { 0x19, 0x02, 0xFF }, "ECM", isSimulation);
+        int waitEcm = 0;
+        while (!exEcm.IsComplete && waitEcm < 500)
+        {
+            await Task.Delay(15);
+            waitEcm += 15;
+        }
 
         // 2. Scan OBD-II Mode 03 (Confirmed emission DTCs)
         await SendRequestAsync(0x7DF, new byte[] { 0x03 }, "ECM", isSimulation);

@@ -33,18 +33,53 @@ public class DiagnosticTroubleCode
     public bool IsPending => (StatusByte & 0x04) != 0;
     public bool IsActive => (StatusByte & 0x01) != 0;
     public bool IsMilRequested => (StatusByte & 0x80) != 0;
+    public bool IsFailedThisCycle => (StatusByte & 0x02) != 0;
+    public bool IsFailedSinceClear => (StatusByte & 0x20) != 0;
+    public bool IsTestNotCompleted => (StatusByte & 0x10) != 0 || (StatusByte & 0x40) != 0;
+
+    public string RawEvidenceHex => $"DTC:0x{RawDtcNumber:X6} Status:0x{StatusByte:X2} (CAN:0x{CanId:X3})";
 
     public List<string> ActiveStatusFlags
     {
         get
         {
             var flags = new List<string>();
-            if (IsActive) flags.Add("Test Failed");
+            if (IsActive) flags.Add("Active / Test Failed");
+            if (IsFailedThisCycle) flags.Add("Failed This Cycle");
             if (IsPending) flags.Add("Pending");
             if (IsConfirmed) flags.Add("Confirmed");
-            if (IsMilRequested) flags.Add("MIL Warning");
-            if ((StatusByte & 0x20) != 0) flags.Add("Failed Since Clear");
+            if (IsFailedSinceClear) flags.Add("Failed Since Clear");
+            if (IsTestNotCompleted) flags.Add("Test Not Completed");
+            if (IsMilRequested) flags.Add("MIL Warning Requested");
             return flags;
         }
     }
+}
+
+public enum DtcClearStatus
+{
+    Cleared,
+    StillPresent,
+    Permanent,
+    Refused,
+    SessionRequired,
+    SecurityRequired,
+    ConditionsNotCorrect,
+    Timeout,
+    NotSupported
+}
+
+public class DtcClearVerificationResult
+{
+    public string EcuName { get; set; } = "ECM";
+    public uint RequestCanId { get; set; } = 0x7E0;
+    public DtcClearStatus Status { get; set; } = DtcClearStatus.Cleared;
+    public string Message { get; set; } = string.Empty;
+    public int PreClearDtcCount { get; set; }
+    public int PostClearDtcCount { get; set; }
+    public List<string> PreClearCodes { get; set; } = new();
+    public List<string> PostClearRemainingCodes { get; set; } = new();
+    public string? RawClearResponseHex { get; set; }
+    public bool IsVerifiedCleared => Status == DtcClearStatus.Cleared && PostClearDtcCount == 0;
+    public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
 }

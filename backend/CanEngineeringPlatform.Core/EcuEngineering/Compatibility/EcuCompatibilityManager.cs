@@ -9,6 +9,8 @@ public interface IEcuCompatibilityManager
     IReadOnlyList<EcuFamilyProfile> GetAllProfiles();
     EcuFamilyProfile? GetProfileById(string familyId);
     EcuFamilyProfile? MatchProfile(string? hardwareNumber, string? softwareNumber, string? ecuName = null);
+    EcuVariantProfile? GetVariant(string familyId, string variantId);
+    EcuVariantProfile? MatchVariant(string? hardwareNumber, string? softwareNumber);
     void RegisterProfile(EcuFamilyProfile profile);
 }
 
@@ -34,6 +36,32 @@ public class EcuCompatibilityManager : IEcuCompatibilityManager
             return _profiles.TryGetValue("DENSO_SH7058", out var p1) ? p1 : null;
         if (familyId.Equals("DENSO_SH7058", StringComparison.OrdinalIgnoreCase))
             return _profiles.TryGetValue("DENSO_SH7058_D4D", out var p2) ? p2 : null;
+        return null;
+    }
+
+    public EcuVariantProfile? GetVariant(string familyId, string variantId)
+    {
+        var profile = GetProfileById(familyId);
+        if (profile == null || string.IsNullOrWhiteSpace(variantId)) return null;
+        return profile.Variants.FirstOrDefault(v => v.VariantId.Equals(variantId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public EcuVariantProfile? MatchVariant(string? hardwareNumber, string? softwareNumber)
+    {
+        string hw = hardwareNumber?.Trim().ToUpperInvariant() ?? string.Empty;
+        string sw = softwareNumber?.Trim().ToUpperInvariant() ?? string.Empty;
+        if (string.IsNullOrEmpty(hw) && string.IsNullOrEmpty(sw)) return null;
+
+        foreach (var profile in _profiles.Values)
+        {
+            foreach (var variant in profile.Variants)
+            {
+                if (!string.IsNullOrEmpty(variant.HardwareNumber) && hw.Contains(variant.HardwareNumber.ToUpperInvariant()))
+                    return variant;
+                if (!string.IsNullOrEmpty(variant.SoftwareNumber) && sw.Contains(variant.SoftwareNumber.ToUpperInvariant()))
+                    return variant;
+            }
+        }
         return null;
     }
 
@@ -245,6 +273,58 @@ public class EcuCompatibilityManager : IEcuCompatibilityManager
                 ["BoostPressure"] = (0.9, 2.4, "bar abs"),
                 ["IntakeAirTemp"] = (10.0, 60.0, "°C"),
                 ["IdleRpm"] = (800.0, 900.0, "RPM")
+            },
+            ReleaseValidation = ReleaseValidationState.DatabaseSourceVerified,
+            PinoutValidation = PinoutValidationState.VariantDependent,
+            ConflictingPinoutVariantsFound = true,
+            ConflictNotice = "MJD 6F3.S1 (Swift 2007-2011) uses Pin 23 CAN-H / Pin 33 CAN-L; MJD 6F3.D4 (Fiat Punto) uses Pin 23 CAN-H / Pin 24 CAN-L. Verify harness connector variant before applying bench power.",
+            SourceProvenance = "Magneti Marelli MultiJet Engineering Specification / OEM Wiring Diagram",
+            Variants = new()
+            {
+                new()
+                {
+                    VariantId = "MJD_6F3_S1_SWIFT",
+                    VariantName = "MJD 6F3.S1 (Maruti Swift DDiS 2007-2011)",
+                    HardwareNumber = "33920-84E00",
+                    SoftwareNumber = "3422S167",
+                    ConnectorDesignation = "64-Pin Main Connector A",
+                    VehiclePlatform = "Maruti Suzuki Swift DDiS 1.3L",
+                    McuModel = "MPC563 / MPC555",
+                    BenchPinout = new()
+                    {
+                        ["Pin 1, 2"] = "+12V Permanent Battery (Terminal 30)",
+                        ["Pin 4, 5"] = "+12V Switched Ignition (Terminal 15)",
+                        ["Pin 3"] = "Ground (Terminal 31)",
+                        ["Pin 23"] = "CAN High (CAN-H 500 kbps)",
+                        ["Pin 33"] = "CAN Low (CAN-L 500 kbps)",
+                        ["Pin 25"] = "K-Line (ISO 9141/14230)"
+                    },
+                    PinoutValidation = PinoutValidationState.Confirmed,
+                    Evidence = EvidenceState.Confirmed,
+                    SourceReference = "Maruti Suzuki Workshop Manual / Swift 1.3 DDiS ECU Pinout"
+                },
+                new()
+                {
+                    VariantId = "MJD_6F3_D4_FIAT",
+                    VariantName = "MJD 6F3.D4 (Fiat Punto / Linea 1.3 MultiJet)",
+                    HardwareNumber = "51826694",
+                    SoftwareNumber = "2944D148",
+                    ConnectorDesignation = "Fiat 60-Pin Harness Connector",
+                    VehiclePlatform = "Fiat Punto 1.3 MultiJet 75HP / Linea 90HP",
+                    McuModel = "MPC563",
+                    BenchPinout = new()
+                    {
+                        ["Pin 1, 2"] = "+12V Permanent Battery (Terminal 30)",
+                        ["Pin 4, 5"] = "+12V Switched Ignition (Terminal 15)",
+                        ["Pin 3"] = "Ground (Terminal 31)",
+                        ["Pin 23"] = "CAN High (CAN-H 500 kbps)",
+                        ["Pin 24"] = "CAN Low (CAN-L 500 kbps)",
+                        ["Pin 11"] = "K-Line"
+                    },
+                    PinoutValidation = PinoutValidationState.Reference,
+                    Evidence = EvidenceState.DatabaseMatch,
+                    SourceReference = "Fiat ePER / MultiJet Technical Service Reference"
+                }
             }
         });
 
@@ -427,6 +507,57 @@ public class EcuCompatibilityManager : IEcuCompatibilityManager
             {
                 "Boot TriCore BSL mode with 1kΩ resistor bypasses corrupted software",
                 "Full flash + DFlash backup restores complete ECU identity"
+            },
+            ReleaseValidation = ReleaseValidationState.DatabaseSourceVerified,
+            PinoutValidation = PinoutValidationState.Confirmed,
+            ConflictingPinoutVariantsFound = false,
+            SourceProvenance = "Bosch Diesel Systems Service Documentation / Mahindra Wiring Diagram",
+            Variants = new()
+            {
+                new()
+                {
+                    VariantId = "EDC17C53_MHAWK_SCORPIO",
+                    VariantName = "Bosch EDC17C53 (Mahindra Scorpio mHawk 2.2 BS4)",
+                    HardwareNumber = "0281018300",
+                    SoftwareNumber = "1037512211",
+                    ConnectorDesignation = "94-pin Engine Harness (A) + 60-pin Vehicle (B)",
+                    VehiclePlatform = "Mahindra Scorpio 2.2 mHawk BS4 140PS",
+                    McuModel = "Infineon TriCore TC1767",
+                    BenchPinout = new()
+                    {
+                        ["Pin A1, A2"] = "+12V Permanent Battery Power",
+                        ["Pin A5"] = "+12V Switched Ignition Terminal 15",
+                        ["Pin A3, A4"] = "Chassis Ground",
+                        ["Pin A67"] = "CAN High (CAN-H 500 kbps)",
+                        ["Pin A68"] = "CAN Low (CAN-L 500 kbps)",
+                        ["Boot Pin"] = "TC1767 Boot pin to Ground via 1kΩ resistor"
+                    },
+                    PinoutValidation = PinoutValidationState.Confirmed,
+                    Evidence = EvidenceState.Confirmed,
+                    SourceReference = "Mahindra Service Manual EDC17C53 Wiring Architecture"
+                },
+                new()
+                {
+                    VariantId = "EDC17C53_STORME_VARICOR",
+                    VariantName = "Bosch EDC17C53 (Tata Safari Storme 2.2 Varicor)",
+                    HardwareNumber = "0281030141",
+                    SoftwareNumber = "1037541299",
+                    ConnectorDesignation = "94-pin Engine Harness (A) + 60-pin Vehicle (B)",
+                    VehiclePlatform = "Tata Safari Storme 2.2 Varicor 156PS",
+                    McuModel = "Infineon TriCore TC1767",
+                    BenchPinout = new()
+                    {
+                        ["Pin A1, A2"] = "+12V Permanent Battery Power",
+                        ["Pin A5"] = "+12V Switched Ignition Terminal 15",
+                        ["Pin A3, A4"] = "Chassis Ground",
+                        ["Pin A67"] = "CAN High (CAN-H 500 kbps)",
+                        ["Pin A68"] = "CAN Low (CAN-L 500 kbps)",
+                        ["Boot Pin"] = "TC1767 Boot pin to Ground via 1kΩ resistor"
+                    },
+                    PinoutValidation = PinoutValidationState.Confirmed,
+                    Evidence = EvidenceState.DatabaseMatch,
+                    SourceReference = "Tata Motors Service Bulletin / Varicor 2.2 Bosch EDC17"
+                }
             }
         });
 

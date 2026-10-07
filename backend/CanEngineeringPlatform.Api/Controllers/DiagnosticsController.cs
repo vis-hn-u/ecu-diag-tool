@@ -119,10 +119,10 @@ public class DiagnosticsController : ControllerBase
     }
 
     [HttpPost("clear-dtcs")]
-    public async Task<IActionResult> ClearDtcs([FromQuery] uint requestCanId = 0x7E0, [FromQuery] string ecuName = "ECM", [FromQuery] bool isSimulation = true)
+    public async Task<ActionResult<DtcClearVerificationResult>> ClearDtcs([FromQuery] uint requestCanId = 0x7E0, [FromQuery] string ecuName = "ECM", [FromQuery] bool isSimulation = true)
     {
-        await _diagnosticService.ClearDtcsAsync(requestCanId, ecuName, isSimulation);
-        return Ok(new { success = true, message = $"DTCs cleared for {ecuName}" });
+        var result = await _diagnosticService.ClearAndVerifyDtcsAsync(requestCanId, ecuName, isSimulation);
+        return Ok(result);
     }
 
     [HttpPost("scan-all-dtcs")]

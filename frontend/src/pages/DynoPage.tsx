@@ -240,8 +240,19 @@ export const DynoPage: React.FC = () => {
   const [isCalculatingRoadRun, setIsCalculatingRoadRun] = useState(false);
 
   // Live Acquisition State Machine
-  type AcquisitionState = 'IDLE' | 'ARMED' | 'RECORDING' | 'COMPLETED';
+  type AcquisitionState = 
+    | 'IDLE' 
+    | 'ARMED' 
+    | 'VALIDATING' 
+    | 'RUN_DETECTED' 
+    | 'MEASURING' 
+    | 'COASTDOWN' 
+    | 'CALCULATING' 
+    | 'QUALITY_CHECK' 
+    | 'COMPLETE' 
+    | 'REJECTED';
   const [acquisitionState, setAcquisitionState] = useState<AcquisitionState>('IDLE');
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [recordedSamplesCount, setRecordedSamplesCount] = useState<number>(0);
   const recordedSamplesRef = useRef<RoadDynoSample[]>([]);
   const pullStartTimeRef = useRef<number>(0);
@@ -388,70 +399,135 @@ export const DynoPage: React.FC = () => {
     }
   };
 
+  const handleArmTrigger = () => {
+    setRejectionReason(null);
+    if (liveCanRpm === null || liveCanSpeed === null) {
+      setAcquisitionState('REJECTED');
+      setRejectionReason(
+        'CAN LIVE DATA UNAVAILABLE: Real Road Dyno acquisition requires live Engine RPM and Vehicle Speed decoded from the vehicle CAN bus. Connect vehicle hardware or switch to the Engine Simulator tab.'
+      );
+      return;
+    }
+    setAcquisitionState('ARMED');
+  };
+
   // Live Sample Sampling Loop
   useEffect(() => {
-    if (acquisitionState !== 'ARMED' && acquisitionState !== 'RECORDING') return;
+    if (
+      acquisitionState !== 'ARMED' && 
+      acquisitionState !== 'VALIDATING' && 
+      acquisitionState !== 'RUN_DETECTED' && 
+      acquisitionState !== 'MEASURING' && 
+      acquisitionState !== 'COASTDOWN'
+    ) return;
 
     const interval = setInterval(() => {
       const v = selectedVehicle || FALLBACK_VEHICLES[0];
       const now = Date.now();
 
-      // Check WOT Trigger when ARMED
-      if (acquisitionState === 'ARMED') {
-        const throttle = liveCanThrottle ?? 0;
-        const rpm = liveCanRpm ?? 0;
-        if (throttle > 75 || rpm > 2000) {
-          setAcquisitionState('RECORDING');
-          pullStartTimeRef.current = now;
-          recordedSamplesRef.current = [];
-          setRecordedSamplesCount(0);
+      // Enforce live data presence - NEVER synthesize fake data in RoadDyno mode
+      if (liveCanRpm === null || liveCanSpeed === null) {
+        if (acquisitionState === 'MEASURING' || acquisitionState === 'RUN_DETECTED') {
+          setAcquisitionState('REJECTED');
+          setRejectionReason('CAN SIGNAL LOSS: Engine RPM or Vehicle Speed dropped out during dyno pull.');
         }
         return;
       }
 
-      // In RECORDING state: collect sample
-      if (acquisitionState === 'RECORDING') {
+      const throttle = liveCanThrottle ?? 100.0;
+      const rpm = liveCanRpm;
+      const speed = liveCanSpeed;
+
+      // 1. ARMED: Waiting for trigger
+      if (acquisitionState === 'ARMED') {
+        if (throttle > 70 || rpm > 1800) {
+          setAcquisitionState('VALIDATING');
+        }
+        return;
+      }
+
+      // 2. VALIDATING: Verify sustained WOT
+      if (acquisitionState === 'VALIDATING') {
+        if (throttle >= 70) {
+          setAcquisitionState('RUN_DETECTED');
+          pullStartTimeRef.current = now;
+          recordedSamplesRef.current = [];
+          setRecordedSamplesCount(0);
+        } else {
+          setAcquisitionState('ARMED');
+        }
+        return;
+      }
+
+      // 3. RUN_DETECTED: Transition to MEASURING
+      if (acquisitionState === 'RUN_DETECTED') {
+        setAcquisitionState('MEASURING');
+        return;
+      }
+
+      // 4. MEASURING: Genuine CAN data only
+      if (acquisitionState === 'MEASURING') {
         const elapsedSec = (now - pullStartTimeRef.current) / 1000.0;
-        const currentRpm = liveCanRpm ?? (1800 + elapsedSec * 950);
-        const currentSpeed = liveCanSpeed ?? (40.0 + elapsedSec * 18.0);
-        const currentThrottle = liveCanThrottle ?? 100.0;
 
         recordedSamplesRef.current.push({
           timestampMs: elapsedSec * 1000.0,
-          gpsSpeedKmh: Math.round(currentSpeed * 10.0) / 10.0,
-          engineRpm: Math.round(currentRpm),
-          throttlePosition: Math.round(currentThrottle)
+          gpsSpeedKmh: Math.round(speed * 10.0) / 10.0,
+          engineRpm: Math.round(rpm),
+          throttlePosition: Math.round(throttle)
         });
         setRecordedSamplesCount(recordedSamplesRef.current.length);
 
-        // Auto-complete if WOT finished or exceeded max duration
         const redline = v.engine?.redlineRpm || 4800;
-        const isEndOfPull = (currentThrottle < 40 && recordedSamplesRef.current.length >= 15) || 
-                            currentRpm >= redline || 
-                            elapsedSec > 8.0;
+        const isEndOfPull = (throttle < 40 && recordedSamplesRef.current.length >= 15) || 
+                            rpm >= redline || 
+                            elapsedSec > 9.0;
 
         if (isEndOfPull && recordedSamplesRef.current.length >= 8) {
+          if (lossModel === 'CoastDown') {
+            setAcquisitionState('COASTDOWN');
+          } else {
+            finishLiveAcquisition();
+          }
+        }
+        return;
+      }
+
+      // 5. COASTDOWN
+      if (acquisitionState === 'COASTDOWN') {
+        const lastSample = recordedSamplesRef.current[recordedSamplesRef.current.length - 1];
+        if (speed < (lastSample?.gpsSpeedKmh || 100) - 15 || throttle > 20) {
           finishLiveAcquisition();
         }
       }
     }, 100);
 
     return () => clearInterval(interval);
-  }, [acquisitionState, liveCanRpm, liveCanSpeed, liveCanThrottle, selectedVehicle]);
+  }, [acquisitionState, liveCanRpm, liveCanSpeed, liveCanThrottle, selectedVehicle, lossModel]);
 
   // Finish and compute dyno curve from recorded samples
   const finishLiveAcquisition = async () => {
     const v = selectedVehicle || FALLBACK_VEHICLES[0];
     const samples = [...recordedSamplesRef.current];
-    setAcquisitionState('COMPLETED');
     setIsCalculatingRoadRun(true);
 
     if (samples.length < 5) {
-      alert('Insufficient data samples recorded. Minimum 5 samples required for dyno curve.');
+      setAcquisitionState('REJECTED');
+      setRejectionReason('INSUFFICIENT DATA: Fewer than 5 valid CAN samples were acquired during the pull.');
       setIsCalculatingRoadRun(false);
       return;
     }
 
+    setAcquisitionState('QUALITY_CHECK');
+    const startRpm = samples[0].engineRpm;
+    const endRpm = samples[samples.length - 1].engineRpm;
+    if (endRpm <= startRpm + 350) {
+      setAcquisitionState('REJECTED');
+      setRejectionReason(`RPM SLOPE INVALID: Engine RPM did not rise sufficiently during pull (${startRpm} -> ${endRpm} RPM). Verify vehicle was at WOT in gear.`);
+      setIsCalculatingRoadRun(false);
+      return;
+    }
+
+    setAcquisitionState('CALCULATING');
     try {
       const run = await api.runRoadDyno({
         name: `Live CAN Pull #${roadRuns.length + 1} (${v.name.split('(')[0].trim()})`,
@@ -465,8 +541,10 @@ export const DynoPage: React.FC = () => {
 
       setActiveRoadRun(run);
       setRoadRuns(prev => [run, ...prev]);
+      setAcquisitionState('COMPLETE');
     } catch (err: any) {
-      alert(`Dyno calculation failed: ${err.message}`);
+      setAcquisitionState('REJECTED');
+      setRejectionReason(`Dyno calculation failed: ${err.message || 'Error computing curve'}`);
     } finally {
       setIsCalculatingRoadRun(false);
     }
@@ -688,12 +766,12 @@ export const DynoPage: React.FC = () => {
                 <span>{isCalculatingRoadRun ? 'Computing Dyno...' : 'Run Bench Dyno Sweep'}</span>
               </button>
 
-              {acquisitionState === 'IDLE' || acquisitionState === 'COMPLETED' ? (
+              {acquisitionState === 'IDLE' || acquisitionState === 'COMPLETE' || acquisitionState === 'REJECTED' ? (
                 <button
-                  onClick={() => setAcquisitionState('ARMED')}
+                  onClick={handleArmTrigger}
                   disabled={isCalculatingRoadRun}
                   className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold flex items-center space-x-1.5 shadow"
-                  title="Arm auto WOT pull detection: starts recording when throttle exceeds 75%"
+                  title="Arm auto WOT pull detection: requires live Engine RPM and Vehicle Speed on CAN bus"
                 >
                   <Flame className="w-3.5 h-3.5" />
                   <span>Arm WOT Trigger</span>
@@ -706,14 +784,24 @@ export const DynoPage: React.FC = () => {
                   <Square className="w-3.5 h-3.5" />
                   <span>ARMED: Hit Full Throttle (Cancel)</span>
                 </button>
-              ) : (
+              ) : acquisitionState === 'VALIDATING' || acquisitionState === 'RUN_DETECTED' ? (
+                <div className="px-3.5 py-1.5 bg-amber-500/20 border border-amber-500 text-amber-300 rounded font-bold flex items-center space-x-1.5 animate-pulse">
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>Detecting WOT Acceleration...</span>
+                </div>
+              ) : acquisitionState === 'MEASURING' ? (
                 <button
                   onClick={finishLiveAcquisition}
                   className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold flex items-center space-x-1.5 shadow animate-pulse"
                 >
                   <Square className="w-3.5 h-3.5" />
-                  <span>Stop & Compute ({recordedSamplesCount} pts)</span>
+                  <span>Measuring ({recordedSamplesCount} CAN pts) - Stop</span>
                 </button>
+              ) : (
+                <div className="px-3.5 py-1.5 bg-sky-950 border border-sky-600 text-sky-300 rounded font-bold flex items-center space-x-1.5">
+                  <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                  <span>Processing Dyno Curve...</span>
+                </div>
               )}
             </div>
           )}
@@ -738,6 +826,78 @@ export const DynoPage: React.FC = () => {
             <FileText className="w-3.5 h-3.5 text-sky-400" />
             <span>{isExportingDynoPdf ? 'Generating...' : 'Export Dyno PDF'}</span>
           </button>
+        </div>
+      </div>
+
+      {/* REJECTION ALERT BANNER */}
+      {acquisitionState === 'REJECTED' && rejectionReason && (
+        <div className="bg-rose-950/40 border border-rose-600 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3 text-rose-200 font-sans shadow-lg animate-in fade-in duration-200">
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-rose-600/20 border border-rose-500 rounded-lg text-rose-400">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+            </div>
+            <div>
+              <div className="font-bold text-sm text-white flex items-center space-x-2">
+                <span>Acquisition Rejected</span>
+                <span className="px-1.5 py-0.2 bg-rose-600/30 text-rose-300 text-[10px] rounded border border-rose-500/40 font-mono">
+                  HARDWARE REQUIRED
+                </span>
+              </div>
+              <div className="text-xs text-rose-300/90 mt-0.5">{rejectionReason}</div>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => {
+                setAcquisitionState('IDLE');
+                setRejectionReason(null);
+              }}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-bold transition-all"
+            >
+              Dismiss
+            </button>
+            <button
+              onClick={() => {
+                setDynoMode('Simulator');
+                setAcquisitionState('IDLE');
+                setRejectionReason(null);
+              }}
+              className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow transition-all"
+            >
+              <Flame className="w-3.5 h-3.5" />
+              <span>Switch to Engine Simulator</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* VERIFICATION STATE BADGE STRIP */}
+      <div className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 text-xs font-sans ${
+        dynoMode === 'Simulator' 
+          ? 'bg-purple-950/20 border-purple-800/60 text-purple-200' 
+          : 'bg-slate-900 border-can-border text-slate-300'
+      }`}>
+        <div className="flex items-center space-x-2">
+          {dynoMode === 'Simulator' ? (
+            <>
+              <span className="px-2 py-0.5 bg-purple-600/30 border border-purple-500 rounded text-[11px] font-bold font-mono text-purple-300">
+                SIMULATION VERIFIED
+              </span>
+              <span>Deterministic thermodynamic engine & inertia physics model. Validated offline without vehicle hardware.</span>
+            </>
+          ) : (
+            <>
+              <span className="px-2 py-0.5 bg-amber-600/30 border border-amber-500 rounded text-[11px] font-bold font-mono text-amber-300">
+                HARDWARE REQUIRED
+              </span>
+              <span>
+                Road dyno requires physical vehicle CAN bus signals ({liveCanRpm ? `${Math.round(liveCanRpm)} RPM` : 'RPM: UNAVAILABLE'}, {liveCanSpeed ? `${liveCanSpeed.toFixed(1)} km/h` : 'Speed: UNAVAILABLE'}).
+              </span>
+            </>
+          )}
+        </div>
+        <div className="font-mono text-[11px] text-slate-400">
+          Acquisition Status: <strong className={acquisitionState === 'REJECTED' ? 'text-rose-400' : 'text-sky-400'}>{acquisitionState}</strong>
         </div>
       </div>
 
@@ -845,16 +1005,26 @@ export const DynoPage: React.FC = () => {
                     LIVE ECU CAN STREAM: {selectedVehicle?.name || 'Active Vehicle'}
                   </span>
                   <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                    acquisitionState === 'ARMED' 
+                    acquisitionState === 'ARMED' || acquisitionState === 'VALIDATING'
                       ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
-                      : acquisitionState === 'RECORDING'
+                      : acquisitionState === 'MEASURING' || acquisitionState === 'RUN_DETECTED'
                       ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse'
+                      : acquisitionState === 'COMPLETE'
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                      : acquisitionState === 'REJECTED'
+                      ? 'bg-rose-950/60 text-rose-400 border border-rose-600'
                       : 'bg-slate-800 text-slate-400 border border-slate-700'
                   }`}>
                     {acquisitionState === 'IDLE' && 'STATUS: STANDBY'}
                     {acquisitionState === 'ARMED' && 'TRIGGER ARMED: AWAITING WOT > 75%'}
-                    {acquisitionState === 'RECORDING' && `RECORDING PULL (${recordedSamplesCount} SAMPLES)`}
-                    {acquisitionState === 'COMPLETED' && 'PULL ACQUIRED & COMPUTED'}
+                    {acquisitionState === 'VALIDATING' && 'VALIDATING WOT ACCELERATION...'}
+                    {acquisitionState === 'RUN_DETECTED' && 'ACCELERATION RUN DETECTED'}
+                    {acquisitionState === 'MEASURING' && `MEASURING PULL (${recordedSamplesCount} CAN SAMPLES)`}
+                    {acquisitionState === 'COASTDOWN' && 'MEASURING IN-GEAR COASTDOWN'}
+                    {acquisitionState === 'CALCULATING' && 'CALCULATING POWER & TORQUE CURVES'}
+                    {acquisitionState === 'QUALITY_CHECK' && 'VERIFYING DATA QUALITY'}
+                    {acquisitionState === 'COMPLETE' && 'PULL ACQUIRED & COMPUTED'}
+                    {acquisitionState === 'REJECTED' && 'ACQUISITION REJECTED'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">

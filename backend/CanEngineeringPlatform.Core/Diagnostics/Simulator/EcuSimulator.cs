@@ -573,7 +573,7 @@ public class EcuSimulator : IEcuSimulator
                         ecu.TroubleCodes.Add(new DiagnosticTroubleCode
                         {
                             Code = dtcCode,
-                            RawDtcNumber = 0x030000,
+                            RawDtcNumber = EncodeDtcToRawNumber(dtcCode),
                             StatusByte = 0x2F,
                             Description = DtcDecoder.GetDescription(dtcCode),
                             EcuName = ecu.Name,
@@ -626,5 +626,28 @@ public class EcuSimulator : IEcuSimulator
     {
         _nrcOverrides.Clear();
         InitializeDefaultVirtualEcus();
+    }
+
+    private static uint EncodeDtcToRawNumber(string dtcCode)
+    {
+        if (string.IsNullOrWhiteSpace(dtcCode) || dtcCode.Length < 5) return 0x030000;
+        char prefix = char.ToUpperInvariant(dtcCode[0]);
+        byte pBits = prefix switch
+        {
+            'C' => 1,
+            'B' => 2,
+            'U' => 3,
+            _ => 0
+        };
+        if (int.TryParse(dtcCode.AsSpan(1, 1), System.Globalization.NumberStyles.HexNumber, null, out int d1) &&
+            int.TryParse(dtcCode.AsSpan(2, 1), System.Globalization.NumberStyles.HexNumber, null, out int d2) &&
+            int.TryParse(dtcCode.AsSpan(3, 1), System.Globalization.NumberStyles.HexNumber, null, out int d3) &&
+            int.TryParse(dtcCode.AsSpan(4, 1), System.Globalization.NumberStyles.HexNumber, null, out int d4))
+        {
+            byte high = (byte)(((pBits & 0x03) << 6) | ((d1 & 0x03) << 4) | (d2 & 0x0F));
+            byte mid = (byte)(((d3 & 0x0F) << 4) | (d4 & 0x0F));
+            return (uint)((high << 16) | (mid << 8));
+        }
+        return 0x030000;
     }
 }

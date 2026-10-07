@@ -4,6 +4,7 @@ import { api, downloadBlobAsFile } from '../services/api';
 import { 
   DiagnosticExchange, 
   DiagnosticTroubleCode, 
+  DtcClearVerificationResult,
   EcuIdentification, 
   ObdPidValue, 
   ObdPidDefinition, 
@@ -21,7 +22,7 @@ import {
 import { 
   Wrench, Cpu, Activity, Send, Trash2, RotateCcw, ShieldAlert, CheckCircle2, 
   AlertTriangle, Layers, Gauge, FileText, Radio, Search, Key, RefreshCw,
-  Zap, Lock, ArrowRight, Sliders, Camera, HelpCircle, ExternalLink, Compass, Flame, Sparkles
+  Zap, Lock, ArrowRight, Sliders, Camera, HelpCircle, ExternalLink, Compass, Flame, Sparkles, X
 } from 'lucide-react';
 
 export const DiagnosticsWorkspacePage: React.FC = () => {
@@ -55,6 +56,8 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
   const [selectedDtcMeta, setSelectedDtcMeta] = useState<DtcMetadata | null>(null);
   const [selectedDtcCorrelation, setSelectedDtcCorrelation] = useState<DtcCorrelationResult | null>(null);
   const [isDtcModalOpen, setIsDtcModalOpen] = useState<boolean>(false);
+  const [isClearModalOpen, setIsClearModalOpen] = useState<boolean>(false);
+  const [clearVerificationResult, setClearVerificationResult] = useState<DtcClearVerificationResult | null>(null);
 
   // Request form state
   const [targetEcu, setTargetEcu] = useState<'ECM' | 'ABS' | 'BCM' | 'Broadcast'>('ECM');
@@ -199,21 +202,23 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
   };
 
   const handleClearDtcs = async () => {
+    setIsClearModalOpen(false);
     setIsSending(true);
-    setDtcActionMessage(`Transmitting clear commands (UDS 0x14 FF FF FF & OBD-II Mode 04) to ${targetEcu}...`);
+    setClearVerificationResult(null);
+    setDtcActionMessage(`Executing 5-step verified DTC clear sequence on ${targetEcu} (UDS 0x14 FF FF FF & OBD-II Mode 04)...`);
     try {
       const reqId = ecuCanIdMap[targetEcu] || 0x7E0;
-      await api.clearDtcs(reqId, targetEcu, isSimulation);
-      await new Promise(r => setTimeout(r, 600));
+      const result = await api.clearDtcs(reqId, targetEcu, isSimulation);
+      setClearVerificationResult(result);
       const refreshed = await api.getActiveDtcs();
       setDtcs(refreshed);
-      setDtcActionMessage(`Clear command acknowledged! Active fault codes: ${refreshed.length}`);
+      setDtcActionMessage(result.message);
       await fetchAllDiagnosticsData();
-    } catch {
-      setDtcActionMessage('Clear DTC command rejected or communication error.');
+    } catch (err: any) {
+      setDtcActionMessage(`Clear DTC verification failed: ${err.message || 'Communication error'}`);
     } finally {
       setIsSending(false);
-      setTimeout(() => setDtcActionMessage(null), 5000);
+      setTimeout(() => setDtcActionMessage(null), 8000);
     }
   };
 
@@ -472,16 +477,88 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                   <span>{isScanningDtcs ? 'Scanning Protocols...' : 'Scan All DTCs (UDS + OBD)'}</span>
                 </button>
                 <button
-                  onClick={handleClearDtcs}
+                  onClick={() => setIsClearModalOpen(true)}
                   disabled={isSending || isScanningDtcs}
                   className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow"
-                  title="Purge NVRAM fault codes using UDS 0x14 FF FF FF and OBD-II Mode 04"
+                  title="Purge NVRAM fault codes using verified UDS 0x14 FF FF FF and OBD-II Mode 04 sequence"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>{isSending ? 'Clearing Faults...' : 'Clear All Faults (0x14 + Mode 04)'}</span>
                 </button>
               </div>
             </div>
+
+            {/* DTC Clear Verification Result Banner */}
+            {clearVerificationResult && (
+              <div className={`p-4 rounded-lg border shadow-md font-sans space-y-2 animate-fadeIn ${
+                clearVerificationResult.clearedSuccessfully
+                  ? 'bg-emerald-950/40 border-emerald-500/60 text-emerald-200'
+                  : clearVerificationResult.status === 'ConditionsNotCorrect'
+                    ? 'bg-amber-950/40 border-amber-500/60 text-amber-200'
+                    : 'bg-rose-950/40 border-rose-500/60 text-rose-200'
+              }`}>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2.5">
+                    {clearVerificationResult.clearedSuccessfully ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                    )}
+                    <div>
+                      <div className="font-bold text-sm text-white flex items-center space-x-2">
+                        <span>
+                          {clearVerificationResult.clearedSuccessfully ? 'DTC CLEAR VERIFIED' : 'CLEAR NOT COMPLETED'}
+                        </span>
+                        <span className={`px-2 py-0.5 text-[10px] rounded font-mono font-bold uppercase border ${
+                          clearVerificationResult.clearedSuccessfully
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                        }`}>
+                          {clearVerificationResult.status}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 mt-0.5">{clearVerificationResult.message}</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setClearVerificationResult(null)}
+                    className="p-1 hover:bg-slate-800 rounded text-slate-400 hover:text-white"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-700/60 text-xs font-mono">
+                  <div>
+                    <span className="text-slate-400">Pre-Clear Count:</span>{' '}
+                    <strong className="text-white">{clearVerificationResult.preClearDtcCount}</strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Post-Clear Count:</span>{' '}
+                    <strong className={clearVerificationResult.postClearDtcCount === 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {clearVerificationResult.postClearDtcCount}
+                    </strong>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Erased Codes:</span>{' '}
+                    <span className="text-emerald-300">
+                      {clearVerificationResult.clearedCodes.length > 0 ? clearVerificationResult.clearedCodes.join(', ') : 'None'}
+                    </span>
+                  </div>
+                </div>
+
+                {clearVerificationResult.persistingCodes.length > 0 && (
+                  <div className="text-xs text-rose-300 bg-rose-950/60 p-2 rounded border border-rose-800/80">
+                    <strong>Persistent Faults:</strong> {clearVerificationResult.persistingCodes.join(', ')} — Hard fault still present in circuit/sensor.
+                  </div>
+                )}
+                {clearVerificationResult.reTriggeredCodes.length > 0 && (
+                  <div className="text-xs text-amber-300 bg-amber-950/60 p-2 rounded border border-amber-800/80">
+                    <strong>Re-triggered Faults:</strong> {clearVerificationResult.reTriggeredCodes.join(', ')} — ECU immediately re-flagged fault cycle on self-test.
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* DTC Action Notification Banner */}
             {dtcActionMessage && (
@@ -967,6 +1044,77 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                   ))}
                 </ol>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clear DTC Safety Confirmation Modal */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 font-sans animate-fadeIn">
+          <div className="bg-can-panel border border-rose-600/60 rounded-xl max-w-lg w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-can-border pb-3">
+              <div className="flex items-center space-x-2 text-rose-400">
+                <AlertTriangle className="w-5 h-5" />
+                <span className="font-bold text-sm tracking-wide text-white uppercase">Confirm ECU Fault Code Erase</span>
+              </div>
+              <button
+                onClick={() => setIsClearModalOpen(false)}
+                className="p-1 hover:bg-slate-800 text-slate-400 hover:text-white rounded"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs text-slate-300">
+              <div className="p-3 bg-rose-950/30 border border-rose-500/40 rounded-lg space-y-1.5 text-rose-200">
+                <div className="font-bold text-rose-100 flex items-center space-x-1.5">
+                  <ShieldAlert className="w-4 h-4 text-rose-400" />
+                  <span>Permanent NVRAM Diagnostic Erase Sequence</span>
+                </div>
+                <p className="text-[11px] leading-relaxed">
+                  You are about to transmit diagnostic service <strong className="text-white font-mono">0x14 FF FF FF</strong> and <strong className="text-white font-mono">OBD-II Mode 04</strong> to <strong className="text-white">{targetEcu}</strong> (0x{(ecuCanIdMap[targetEcu] || 0x7E0).toString(16).toUpperCase()}).
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <span className="font-bold text-[11px] text-slate-400 uppercase tracking-wider block">ECU Safety Prerequisites:</span>
+                <ul className="space-y-1 text-[11px] text-slate-300">
+                  <li className="flex items-center space-x-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    <span>Ignition ON, Engine OFF (KOEO). Engine must not be rotating.</span>
+                  </li>
+                  <li className="flex items-center space-x-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    <span>Vehicle Speed must be exactly 0 km/h with parking brake set.</span>
+                  </li>
+                  <li className="flex items-center space-x-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    <span>Clearing freeze frames will reset OBD readiness monitors to incomplete.</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div className="p-2.5 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-400">
+                <strong className="text-sky-300">Automatic 5-Step Verification:</strong> The platform will take a pre-clear snapshot, transmit commands, catch NRC 0x22 (Conditions Not Correct), re-read active codes, and verify physical clearance.
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-2 border-t border-can-border">
+              <button
+                onClick={() => setIsClearModalOpen(false)}
+                className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-bold transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleClearDtcs}
+                disabled={isSending}
+                className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow transition-all"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{isSending ? 'Transmitting...' : 'Confirm Clear & Verify'}</span>
+              </button>
             </div>
           </div>
         </div>

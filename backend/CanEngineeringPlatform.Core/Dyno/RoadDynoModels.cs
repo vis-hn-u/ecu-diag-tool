@@ -161,6 +161,20 @@ public class RoadDynoDataPoint
     public double CorrectedEngineTorqueNm { get; set; }
 }
 
+public enum DynoAcquisitionState
+{
+    Idle,
+    Armed,
+    Validating,
+    RunDetected,
+    Measuring,
+    CoastDown,
+    Calculating,
+    QualityCheck,
+    Complete,
+    Rejected
+}
+
 public class RunQualityMetrics
 {
     public double SmoothnessScore { get; set; } = 95.0; // 0-100%
@@ -171,6 +185,7 @@ public class RunQualityMetrics
     public double GearRatioVariancePct { get; set; }
     public int DetectedGear { get; set; } = 3;
     public string QualityRating { get; set; } = "EXCELLENT"; // EXCELLENT, GOOD, MARGINAL, REJECTED
+    public string? RejectionReason { get; set; }
     public List<string> Warnings { get; set; } = new();
 }
 

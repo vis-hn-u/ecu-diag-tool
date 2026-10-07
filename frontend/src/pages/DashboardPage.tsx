@@ -21,7 +21,7 @@ interface DashboardProps {
 }
 
 export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
-  const { fps, totalFrames, activeDbc, topology, gatewayStatus, signals, refreshDbc } = useCan();
+  const { fps, totalFrames, activeDbc, topology, gatewayStatus, hardwareStatus, operatingMode, replayStatus, signals, refreshDbc } = useCan();
   const [viewMode, setViewMode] = useState<'designer' | 'overview'>('designer');
 
   // Dashboard layout state
@@ -197,50 +197,222 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
     return null;
   };
 
-  const getWidgetLiveValue = (widget: DashboardWidget): number => {
+  interface WidgetLiveState {
+    value: number | null;
+    quality: 'VALID' | 'STALE' | 'INVALID' | 'UNAVAILABLE';
+    source: 'ECU' | 'OBD' | 'UDS' | 'DBC' | 'J1939' | 'SIMULATION' | 'REPLAY' | 'DERIVED' | 'NONE';
+    ageMs: number;
+  }
+
+  const getWidgetLiveState = (widget: DashboardWidget): WidgetLiveState => {
     // 1. Priority: DBC Decoded Live CAN Bus Signals
     const matchedSignal = findMatchingSignal(widget);
     if (matchedSignal && typeof matchedSignal.engineeringValue === 'number') {
       const val = matchedSignal.engineeringValue;
-      if (peaks[widget.id] === undefined || val > peaks[widget.id]) {
+      const sigTime = matchedSignal.timestampUtc ? new Date(matchedSignal.timestampUtc).getTime() : Date.now();
+      const ageMs = Math.max(0, Date.now() - sigTime);
+      const isStale = ageMs > 3500;
+      const quality = isStale ? 'STALE' : 'VALID';
+
+      const source = (operatingMode === 'Simulation' || hardwareStatus?.type === 'Simulation' || replayStatus?.isPlaying)
+        ? 'SIMULATION'
+        : 'DBC';
+
+      if (quality === 'VALID' && (peaks[widget.id] === undefined || val > peaks[widget.id])) {
         setPeaks(p => ({ ...p, [widget.id]: val }));
       }
-      return val;
+
+      return {
+        value: val,
+        quality,
+        source,
+        ageMs
+      };
     }
 
-    // 2. If live CAN frames are actively arriving from bus (hardware online), return nominal base reading
-    if (totalFrames > 0) {
-      if (widget.title.includes('ENGINE SPEED') || widget.unit === 'RPM') return 850; // Idle RPM
-      if (widget.title.includes('COOLANT') || widget.unit === '°C') return 85.0;
-      if (widget.title.includes('FUEL') && widget.unit === 'bar') return 300.0;
-      if (widget.unit === 'V') return 13.8;
-      return widget.minValue;
+    // 2. No matching signal available from bus - NEVER synthesize or fabricate fake sine waves
+    return {
+      value: null,
+      quality: 'UNAVAILABLE',
+      source: 'NONE',
+      ageMs: 0
+    };
+  };
+
+  const handleAutoMapFromDiscoveredSignals = () => {
+    if (!activeLayout) return;
+    const signalEntries = Object.entries(signals);
+    if (signalEntries.length === 0) return;
+
+    const canonicalMap: {
+      key: string;
+      matcher: (name: string, unit: string) => boolean;
+      widget: (sig: DecodedSignal) => DashboardWidget;
+    }[] = [
+      {
+        key: 'rpm',
+        matcher: (n, u) => n.includes('rpm') || u === 'rpm' || n.includes('drehzahl') || n.includes('engspd'),
+        widget: (sig) => ({
+          id: `auto_rpm_${Date.now()}`,
+          title: 'ENGINE SPEED',
+          subtitle: sig.messageName || 'Engine Controller',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'RadialGauge',
+          unit: 'RPM',
+          minValue: 0,
+          maxValue: 7000,
+          decimalPlaces: 0,
+          warnThreshold: 5500,
+          colorScheme: 'amber',
+          position: { x: 0, y: 0, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'speed',
+        matcher: (n, u) => n.includes('speed') || u === 'km/h' || n.includes('geschw') || n.includes('vehspd'),
+        widget: (sig) => ({
+          id: `auto_speed_${Date.now()}`,
+          title: 'VEHICLE SPEED',
+          subtitle: sig.messageName || 'Instrument Cluster / ABS',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'RadialGauge',
+          unit: 'km/h',
+          minValue: 0,
+          maxValue: 260,
+          decimalPlaces: 0,
+          colorScheme: 'sky',
+          position: { x: 4, y: 0, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'coolant',
+        matcher: (n, u) => (n.includes('coolant') || n.includes('kuehl') || n.includes('ect')) && (u === '°c' || u === 'c'),
+        widget: (sig) => ({
+          id: `auto_ect_${Date.now()}`,
+          title: 'COOLANT TEMP',
+          subtitle: sig.messageName || 'Engine Telemetry',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'LevelBar',
+          unit: '°C',
+          minValue: 0,
+          maxValue: 130,
+          decimalPlaces: 1,
+          warnThreshold: 105,
+          colorScheme: 'rose',
+          position: { x: 8, y: 0, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'fuel_rail',
+        matcher: (n, u) => (n.includes('rail') || n.includes('cr_') || n.includes('fuelpress')) && (u === 'bar' || u === 'mpa'),
+        widget: (sig) => ({
+          id: `auto_rail_${Date.now()}`,
+          title: 'FUEL RAIL PRESSURE',
+          subtitle: sig.messageName || 'Common Rail System',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'LevelBar',
+          unit: sig.unit || 'bar',
+          minValue: 0,
+          maxValue: 2000,
+          decimalPlaces: 1,
+          warnThreshold: 1800,
+          colorScheme: 'amber',
+          position: { x: 0, y: 2, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'throttle',
+        matcher: (n, u) => n.includes('throttle') || n.includes('pedal') || n.includes('accel') || n.includes('gaspedal'),
+        widget: (sig) => ({
+          id: `auto_app_${Date.now()}`,
+          title: 'THROTTLE POSITION',
+          subtitle: sig.messageName || 'Drive-by-Wire Pedal',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'LevelBar',
+          unit: '%',
+          minValue: 0,
+          maxValue: 100,
+          decimalPlaces: 1,
+          colorScheme: 'emerald',
+          position: { x: 4, y: 2, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'battery',
+        matcher: (n, u) => (n.includes('batt') || n.includes('volt') || n.includes('spannung')) && (u === 'v' || u === 'volt'),
+        widget: (sig) => ({
+          id: `auto_volt_${Date.now()}`,
+          title: 'BATTERY VOLTAGE',
+          subtitle: sig.messageName || 'Power Management',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'DigitalValue',
+          unit: 'V',
+          minValue: 8,
+          maxValue: 16,
+          decimalPlaces: 2,
+          warnThreshold: 14.8,
+          colorScheme: 'sky',
+          position: { x: 8, y: 2, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'boost',
+        matcher: (n, u) => (n.includes('boost') || n.includes('ladedruck') || n.includes('map_')) && (u === 'bar' || u === 'kpa' || u === 'hpa'),
+        widget: (sig) => ({
+          id: `auto_boost_${Date.now()}`,
+          title: 'BOOST PRESSURE',
+          subtitle: sig.messageName || 'Turbo Management',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'LevelBar',
+          unit: sig.unit || 'bar',
+          minValue: 0,
+          maxValue: 3.5,
+          decimalPlaces: 2,
+          warnThreshold: 2.2,
+          colorScheme: 'purple',
+          position: { x: 0, y: 4, w: 4, h: 2 }
+        })
+      },
+      {
+        key: 'iat',
+        matcher: (n, u) => (n.includes('iat') || n.includes('intake') || n.includes('ansaug')) && (u === '°c' || u === 'c'),
+        widget: (sig) => ({
+          id: `auto_iat_${Date.now()}`,
+          title: 'INTAKE AIR TEMP',
+          subtitle: sig.messageName || 'Manifold Sensor',
+          sourceType: 'CanSignal',
+          sourceIdentifier: sig.signalName,
+          type: 'DigitalValue',
+          unit: '°C',
+          minValue: -20,
+          maxValue: 80,
+          decimalPlaces: 1,
+          colorScheme: 'emerald',
+          position: { x: 4, y: 4, w: 4, h: 2 }
+        })
+      }
+    ];
+
+    const newWidgets: DashboardWidget[] = [];
+    for (const cano of canonicalMap) {
+      const found = signalEntries.find(([name, sig]) => cano.matcher(name.toLowerCase(), (sig.unit || '').toLowerCase()));
+      if (found) {
+        newWidgets.push(cano.widget(found[1]));
+      }
     }
 
-    // 3. Fallback when completely offline / standalone demo
-    const now = Date.now() / 1000.0;
-    if (widget.title.includes('ENGINE SPEED') || widget.unit === 'RPM') {
-      return 2200 + Math.sin(now * 1.5) * 1800 + 1000;
+    if (newWidgets.length > 0) {
+      const updatedLayout = { ...activeLayout, widgets: newWidgets };
+      setActiveLayout(updatedLayout);
+      api.saveDashboardLayout(updatedLayout);
     }
-    if (widget.title.includes('BOOST') || widget.unit === 'bar') {
-      return Math.max(0, 0.4 + Math.sin(now * 1.5) * 0.9);
-    }
-    if (widget.title.includes('SPEED') || widget.unit === 'km/h') {
-      return Math.max(0, 60 + Math.sin(now * 0.8) * 45);
-    }
-    if (widget.title.includes('LAMBDA') || widget.unit === 'λ') {
-      return 0.88 + Math.sin(now * 2.0) * 0.08;
-    }
-    if (widget.title.includes('COOLANT') || widget.unit === '°C') {
-      return 89.5 + Math.sin(now * 0.1) * 2.0;
-    }
-    if (widget.title.includes('FUEL') && widget.unit === 'bar') {
-      return 145.0 + Math.sin(now * 1.5) * 25.0;
-    }
-    if (widget.type === 'StatusAnnunciator') {
-      return 0; // Nominal off
-    }
-    return (widget.minValue + widget.maxValue) / 2.0;
   };
 
   const handleLoadSampleDbc = async () => {
@@ -336,13 +508,75 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
         </div>
       </div>
 
+      {/* OPERATING MODE & HARDWARE VERIFICATION STATUS BAR */}
+      <div className={`p-3 rounded-lg border flex flex-wrap items-center justify-between gap-3 text-xs font-sans ${
+        (operatingMode === 'Simulation' || replayStatus?.isPlaying)
+          ? 'bg-purple-950/30 border-purple-800 text-purple-200'
+          : hardwareStatus?.isConnected
+            ? 'bg-emerald-950/30 border-emerald-800 text-emerald-200'
+            : 'bg-amber-950/20 border-amber-800/60 text-amber-200'
+      }`}>
+        <div className="flex items-center space-x-2.5">
+          {(operatingMode === 'Simulation' || replayStatus?.isPlaying) ? (
+            <>
+              <span className="px-2 py-0.5 bg-purple-600/30 border border-purple-500 rounded font-bold font-mono text-[11px] text-purple-300">
+                [SIMULATION / REPLAY MODE]
+              </span>
+              <span className="text-slate-300">
+                Virtual CAN bus active. Decoded signals are generated by deterministic models or recorded log sessions.
+              </span>
+            </>
+          ) : hardwareStatus?.isConnected ? (
+            <>
+              <span className="px-2 py-0.5 bg-emerald-600/30 border border-emerald-500 rounded font-bold font-mono text-[11px] text-emerald-300">
+                [PHYSICAL HARDWARE ONLINE]
+              </span>
+              <span className="text-slate-300">
+                Connected to <strong className="text-white">{hardwareStatus.name}</strong> • Bus traffic: <span className="font-mono text-emerald-400 font-bold">{fps} fps ({totalFrames.toLocaleString()} frames)</span>
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="px-2 py-0.5 bg-amber-600/30 border border-amber-500 rounded font-bold font-mono text-[11px] text-amber-300">
+                [NO HARDWARE CONNECTED]
+              </span>
+              <span className="text-slate-300">
+                Offline state. No physical CAN gateway or vehicle connected. All gauges show <strong className="text-white">NO DATA</strong>.
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center space-x-2">
+          {!hardwareStatus?.isConnected && operatingMode !== 'Simulation' && (
+            <button
+              onClick={handleStartSim}
+              className="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white rounded text-xs font-bold flex items-center space-x-1 shadow transition-all"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Launch Virtual Simulation</span>
+            </button>
+          )}
+          {Object.keys(signals).length > 0 && (
+            <button
+              onClick={handleAutoMapFromDiscoveredSignals}
+              className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold flex items-center space-x-1 shadow transition-all"
+              title="Automatically calibrate and layout cockpit gauges from incoming bus signals"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>Auto-Map Cockpit From Active Bus</span>
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* DESIGNER COCKPIT MODE */}
       {viewMode === 'designer' && (
         <div className="space-y-4">
           {/* Active Grid of Customizable Widgets */}
           <div className="grid grid-cols-12 gap-4">
             {activeLayout?.widgets.map(w => {
-              const liveVal = getWidgetLiveValue(w);
+              const liveState = getWidgetLiveState(w);
               const colSpanClass = 
                 w.position.w === 2 ? 'col-span-12 md:col-span-2' :
                 w.position.w === 3 ? 'col-span-12 md:col-span-3' :
@@ -383,19 +617,50 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
 
                   {/* Render Specific Widget */}
                   {w.type === 'RadialGauge' && (
-                    <RadialGaugeWidget widget={w} currentValue={liveVal} />
+                    <RadialGaugeWidget 
+                      widget={w} 
+                      currentValue={liveState.value} 
+                      quality={liveState.quality}
+                      source={liveState.source}
+                      ageMs={liveState.ageMs}
+                    />
                   )}
                   {w.type === 'DigitalValue' && (
-                    <DigitalValueWidget widget={w} currentValue={liveVal} peakValue={peaks[w.id]} />
+                    <DigitalValueWidget 
+                      widget={w} 
+                      currentValue={liveState.value} 
+                      peakValue={peaks[w.id]} 
+                      quality={liveState.quality}
+                      source={liveState.source}
+                      ageMs={liveState.ageMs}
+                    />
                   )}
                   {w.type === 'MiniGraph' && (
-                    <MiniGraphWidget widget={w} currentValue={liveVal} />
+                    <MiniGraphWidget 
+                      widget={w} 
+                      currentValue={liveState.value} 
+                      quality={liveState.quality}
+                      source={liveState.source}
+                      ageMs={liveState.ageMs}
+                    />
                   )}
                   {w.type === 'LevelBar' && (
-                    <LevelBarWidget widget={w} currentValue={liveVal} />
+                    <LevelBarWidget 
+                      widget={w} 
+                      currentValue={liveState.value} 
+                      quality={liveState.quality}
+                      source={liveState.source}
+                      ageMs={liveState.ageMs}
+                    />
                   )}
                   {w.type === 'StatusAnnunciator' && (
-                    <StatusAnnunciatorWidget widget={w} currentValue={liveVal} />
+                    <StatusAnnunciatorWidget 
+                      widget={w} 
+                      currentValue={liveState.value} 
+                      quality={liveState.quality}
+                      source={liveState.source}
+                      ageMs={liveState.ageMs}
+                    />
                   )}
                 </div>
               );

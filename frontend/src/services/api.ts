@@ -36,7 +36,7 @@ import {
   CopilotQueryRequest,
   CopilotResponse
 } from '../types';
-import { DiagnosticExchange, DiagnosticTroubleCode, EcuIdentification, ObdPidValue, ObdPidDefinition, VirtualEcu } from '../types/diagnostics';
+import { DiagnosticExchange, DiagnosticTroubleCode, DtcClearVerificationResult, EcuIdentification, ObdPidValue, ObdPidDefinition, VirtualEcu } from '../types/diagnostics';
 import { 
   EngineOutputs, EngineParameters, EngineInputs, DynoPullSummary, VehiclePerformanceSummary, 
   CalibrationProject, CalibrationTable, CalibrationDiffCell, CalibrationEditRecord,
@@ -556,7 +556,7 @@ export const api = {
     });
     return res.json();
   },
-  clearDtcs: async (requestCanId: number = 0x7E0, ecuName: string = "ECM", isSimulation: boolean = true): Promise<any> => {
+  clearDtcs: async (requestCanId: number = 0x7E0, ecuName: string = "ECM", isSimulation: boolean = true): Promise<DtcClearVerificationResult> => {
     const res = await fetch(`${API_BASE}/diagnostics/clear-dtcs?requestCanId=${requestCanId}&ecuName=${ecuName}&isSimulation=${isSimulation}`, {
       method: 'POST'
     });

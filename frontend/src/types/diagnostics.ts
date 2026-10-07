@@ -32,7 +32,33 @@ export interface DiagnosticTroubleCode {
   isPending: boolean;
   isConfirmed: boolean;
   isMilRequested: boolean;
+  isFailedThisCycle?: boolean;
+  isFailedSinceClear?: boolean;
+  isTestNotCompleted?: boolean;
+  rawEvidenceHex?: string;
   activeStatusFlags: string[];
+}
+
+export type DtcClearStatus = 
+  | 'VerifiedCleared'
+  | 'StillPresent'
+  | 'ConditionsNotCorrect'
+  | 'SecurityRequired'
+  | 'RequestOutOfRange'
+  | 'GeneralReject'
+  | 'Timeout'
+  | 'TransportError';
+
+export interface DtcClearVerificationResult {
+  status: DtcClearStatus;
+  clearedSuccessfully: boolean;
+  preClearDtcCount: number;
+  postClearDtcCount: number;
+  clearedCodes: string[];
+  persistingCodes: string[];
+  reTriggeredCodes: string[];
+  message: string;
+  verifiedAtUtc: string;
 }
 
 export interface EcuIdentification {

@@ -1648,6 +1648,4 @@ export interface CopilotResponse {
   safetyAdvisory: string;
 }
 
-
-
-
+export type { DtcClearStatus, DtcClearVerificationResult } from './diagnostics';

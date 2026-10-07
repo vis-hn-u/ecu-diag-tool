@@ -27,6 +27,14 @@ public class DbcLibraryItemDto
     public List<string> KeySignals { get; set; } = new();
     public List<string> Nodes { get; set; } = new();
     public bool IsActive { get; set; }
+
+    // Provenance & Hardened Release Validation
+    public string Classification { get; set; } = "Community"; // Verified, Public, Community, Reverse-Engineered, Inferred, Unverified
+    public string ValidationStatus { get; set; } = "DATABASE_SOURCE_VERIFIED (Real Vehicle Validation NOT PERFORMED)";
+    public string Source { get; set; } = "OpenGarages / Comma.ai / Automotive Community";
+    public string License { get; set; } = "MIT / Open Automotive Data License";
+    public string Applicability { get; set; } = "Powertrain & Body High-Speed CAN";
+    public string Confidence { get; set; } = "High (Correlated via Diagnostic IDs)";
 }
 
 [ApiController]

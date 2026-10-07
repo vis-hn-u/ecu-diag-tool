@@ -60,6 +60,60 @@ public class EcuFamilyProfile
 
     // OEM Operational Reference Targets
     public Dictionary<string, (double Min, double Max, string Unit)> OemNormalLimits { get; set; } = new();
+
+    // Release & Provenance Hardening
+    public EvidenceState Evidence { get; set; } = EvidenceState.DatabaseMatch;
+    public ReleaseValidationState ReleaseValidation { get; set; } = ReleaseValidationState.DatabaseSourceVerified;
+    public PinoutValidationState PinoutValidation { get; set; } = PinoutValidationState.Reference;
+    public bool ConflictingPinoutVariantsFound { get; set; } = false;
+    public string? ConflictNotice { get; set; }
+    public string SourceProvenance { get; set; } = "OEM Service Manual / Public Documentation";
+
+    // Variant-Level Records (ECU Family != ECU Variant)
+    public List<EcuVariantProfile> Variants { get; set; } = new();
+}
+
+public enum EvidenceState
+{
+    Confirmed,       // Read and validated directly from connected ECU
+    Detected,        // Detected via active bus scanning / ISO-TP responses
+    DatabaseMatch,   // Matched by verified hardware or software number pattern
+    Inferred,        // Deduced from model/engine family without exact part number match
+    Unknown          // Not determined / no source evidence
+}
+
+public enum ReleaseValidationState
+{
+    SoftwareVerified,         // Unit/integration tests pass with 100% assertions
+    SimulationVerified,       // Verified in software bench / simulated CAN environment
+    DatabasePresent,          // Profile definition exists in local catalog
+    DatabaseSourceVerified,   // Sourced and cross-checked against OEM specifications
+    Inferred,                 // Generic or heuristic match
+    NotValidated,             // Not verified on bench or hardware
+    HardwareRequired          // Requires physical ECU & microcontroller connection
+}
+
+public enum PinoutValidationState
+{
+    Confirmed,         // Bench wiring validated with physical harness
+    Reference,         // Cross-checked against OEM wiring diagrams & tuner pinout documentation
+    VariantDependent,  // Multiple connector / pin configurations exist for this ECU family
+    Unverified         // Reference pinout only - do not apply power without checking pin voltage
+}
+
+public class EcuVariantProfile
+{
+    public string VariantId { get; set; } = string.Empty;
+    public string VariantName { get; set; } = string.Empty;
+    public string HardwareNumber { get; set; } = string.Empty;
+    public string SoftwareNumber { get; set; } = string.Empty;
+    public string ConnectorDesignation { get; set; } = string.Empty;
+    public string VehiclePlatform { get; set; } = string.Empty;
+    public string McuModel { get; set; } = string.Empty;
+    public Dictionary<string, string> BenchPinout { get; set; } = new();
+    public PinoutValidationState PinoutValidation { get; set; } = PinoutValidationState.Reference;
+    public EvidenceState Evidence { get; set; } = EvidenceState.DatabaseMatch;
+    public string SourceReference { get; set; } = string.Empty;
 }
 
 public class MemoryRegionDefinition
