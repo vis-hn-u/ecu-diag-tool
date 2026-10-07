@@ -32,6 +32,32 @@ public class EcuFamilyProfile
     public List<string> KnownConstraints { get; set; } = new();
     public List<string> RecoveryProcedures { get; set; } = new();
 
+    // Identification & Number Patterns
+    public List<string> HardwareNumberPatterns { get; set; } = new();
+    public List<string> SoftwareNumberPatterns { get; set; } = new();
+    public string CalIdPattern { get; set; } = string.Empty;
+    public string CvnPattern { get; set; } = string.Empty;
+
+    // Microprocessor & Architecture Specs
+    public string MicroprocessorFamily { get; set; } = string.Empty;
+    public string InstructionSet { get; set; } = string.Empty;
+    public int CoreClockMhz { get; set; }
+    public string ExternalFlashChip { get; set; } = string.Empty;
+    public string EepromChip { get; set; } = string.Empty;
+
+    // Protocol & Network Specs
+    public List<string> SupportedProtocols { get; set; } = new();
+    public string CanAddressingType { get; set; } = "11-bit Standard (0x7E0 / 0x7E8)";
+    public uint FunctionalBroadcastCanId { get; set; } = 0x7DF;
+    public string KlineProtocol { get; set; } = "ISO 14230-4 KWP2000 Fast Init (10.4 kbps)";
+    public Dictionary<string, string> SecurityAccessLevels { get; set; } = new();
+
+    // Bench / Boot / Pinout & Programming Specs
+    public Dictionary<string, string> BenchPinout { get; set; } = new();
+    public List<string> ProgrammingMethods { get; set; } = new();
+    public string BootPinDetails { get; set; } = string.Empty;
+    public string BdmJtagDetails { get; set; } = string.Empty;
+
     // OEM Operational Reference Targets
     public Dictionary<string, (double Min, double Max, string Unit)> OemNormalLimits { get; set; } = new();
 }

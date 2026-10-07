@@ -1,0 +1,41 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 292 Engine_0x124: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|8000] "rpm" CLUSTER,ABS
+ SG_ ThrottlePosition : 16|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ EngineTorque : 24|8@1+ (1,-100) [-100|400] "Nm" ABS
+ SG_ EngineStatus : 32|8@1+ (1,0) [0|255] "" CLUSTER
+ SG_ AcceleratorPedal : 40|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+
+BO_ 784 Speed_0x310: 8 ABS
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] "km/h" ECM,CLUSTER
+ SG_ BrakeSwitch : 16|1@1+ (1,0) [0|1] "" ECM
+ SG_ ClutchSwitch : 17|1@1+ (1,0) [0|1] "" ECM
+ SG_ WheelSpeedFL : 24|16@1+ (0.01,0) [0|250] "km/h" CLUSTER
+ SG_ WheelSpeedFR : 40|16@1+ (0.01,0) [0|250] "km/h" CLUSTER
+
+BO_ 788 Thermal_0x314: 8 ECM
+ SG_ EngineCoolantTemp : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ FuelTemperature : 8|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ AmbientAirTemp : 16|8@1+ (0.5,-40) [-40|85] "degC" CLUSTER
+ SG_ OilTemperature : 24|8@1+ (1,-40) [-40|160] "degC" CLUSTER
+
+BO_ 792 Pressure_Relays_0x318: 8 ECM
+ SG_ FuelRailPressure : 0|16@1+ (0.1,0) [0|2000] "bar" CLUSTER
+ SG_ BoostPressure : 16|16@1+ (0.1,0) [0|350] "kPa" CLUSTER
+ SG_ AcRelayStatus : 32|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ RadiatorFanRelay : 33|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ GlowPlugRelay : 34|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ BatteryVoltage : 40|8@1+ (0.1,0) [0|25] "V" CLUSTER
+
+BO_ 1440 InstrumentCluster_0x5A0: 8 CLUSTER
+ SG_ OdometerKm : 0|24@1+ (1,0) [0|16777215] "km" ECM
+ SG_ FuelGaugeLevel : 24|8@1+ (0.392157,0) [0|100] "%" ECM
+ SG_ InstantFuelConsumption : 32|16@1+ (0.1,0) [0|100] "km/l" ECM
+
+BO_ 1852 BCM_Immo_0x73C: 8 BCM
+ SG_ ImmobilizerStatus : 0|8@1+ (1,0) [0|255] "" ECM
+ SG_ KeyStatus : 8|8@1+ (1,0) [0|255] "" ECM
+ SG_ BodyWarningState : 16|8@1+ (1,0) [0|255] "" ECM

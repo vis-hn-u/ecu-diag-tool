@@ -23,8 +23,8 @@ public class ResearchDocument
     public string SourceName { get; set; } = string.Empty;
     public string SourceUrl { get; set; } = string.Empty;
     public string License { get; set; } = "OEM Technical Service Information";
-    public string TargetEcuFamily { get; set; } = "Bosch MED17";
-    public string TargetVehicle { get; set; } = "VAG MQB / EA888 Gen3";
+    public string TargetEcuFamily { get; set; } = "Magneti Marelli MJD";
+    public string TargetVehicle { get; set; } = "Maruti Suzuki Swift DDiS";
     public string ContentSummary { get; set; } = string.Empty;
     public List<string> Keywords { get; set; } = new();
     public DateTime IndexedUtc { get; set; } = DateTime.UtcNow;

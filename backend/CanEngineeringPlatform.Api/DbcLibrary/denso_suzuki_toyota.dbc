@@ -1,0 +1,40 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM TCM CLUSTER
+
+BO_ 272 EnginePowertrain_0x110: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|8000] "rpm" CLUSTER,ABS
+ SG_ ThrottlePosition : 16|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ AcceleratorPedal : 24|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ EngineRunState : 32|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ StarterRelayStatus : 33|1@1+ (1,0) [0|1] "" CLUSTER
+
+BO_ 288 CamTiming_Knock_0x120: 8 ECM
+ SG_ VvtCamAngleIntake : 0|8@1+ (0.5,-50) [-50|50] "deg" CLUSTER
+ SG_ VvtCamAngleExhaust : 8|8@1+ (0.5,-50) [-50|50] "deg" CLUSTER
+ SG_ KnockRetardCyl1 : 16|8@1+ (0.25,0) [0|20] "deg" CLUSTER
+ SG_ SparkAdvanceActual : 24|8@1+ (0.5,-30) [-30|60] "deg" CLUSTER
+
+BO_ 512 Speed_Transmission_0x200: 8 TCM
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] "km/h" ECM,CLUSTER
+ SG_ GearPosition : 16|4@1+ (1,0) [0|10] "" CLUSTER
+ SG_ ClutchInterlockSwitch : 20|1@1+ (1,0) [0|1] "" ECM
+ SG_ BrakeLampSwitch : 21|1@1+ (1,0) [0|1] "" ECM
+
+BO_ 640 Thermal_Intake_0x280: 8 ECM
+ SG_ CoolantTemperature : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ IntakeAirTemperature : 8|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ ManifoldAbsolutePressure_MAP : 16|16@1+ (0.1,0) [0|300] "kPa" CLUSTER
+ SG_ BarometricPressure : 32|8@1+ (0.5,50) [50|120] "kPa" CLUSTER
+
+BO_ 800 FuelTrim_O2_0x320: 8 ECM
+ SG_ ShortTermFuelTrim_STFT : 0|8@1+ (0.78125,-100) [-100|99.2] "%" CLUSTER
+ SG_ LongTermFuelTrim_LTFT : 8|8@1+ (0.78125,-100) [-100|99.2] "%" CLUSTER
+ SG_ O2Sensor1Voltage : 16|8@1+ (0.005,0) [0|1.275] "V" CLUSTER
+ SG_ O2Sensor2Voltage : 24|8@1+ (0.005,0) [0|1.275] "V" CLUSTER
+
+BO_ 896 Electrical_FuelLevel_0x380: 8 ECM
+ SG_ BatteryVoltage : 0|8@1+ (0.1,0) [0|25] "V" CLUSTER
+ SG_ AlternatorDutyCycle : 8|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ FuelTankLevel : 16|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ FuelConsumptionRate : 24|16@1+ (0.01,0) [0|50] "l/100km" CLUSTER

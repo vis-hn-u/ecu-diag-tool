@@ -70,11 +70,14 @@ public class Esp8266UsbSerialTransport : ICanTransport
     private readonly byte[] _frameBuffer = new byte[21];
     private int _collected = 0;
 
-    public void Configure(string portName)
+    public byte Channel { get; set; } = 0;
+
+    public void Configure(string portName, byte channel = 0)
     {
         lock (_lock)
         {
             _preferredPort = portName;
+            Channel = channel;
         }
     }
 
@@ -82,6 +85,32 @@ public class Esp8266UsbSerialTransport : ICanTransport
     {
         try
         {
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DEVICEMAP\SERIALCOMM");
+                    if (key != null)
+                    {
+                        var usbPorts = new List<string>();
+                        foreach (var valueName in key.GetValueNames())
+                        {
+                            if (valueName.Contains("Bth", StringComparison.OrdinalIgnoreCase) ||
+                                valueName.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+                            var port = key.GetValue(valueName)?.ToString();
+                            if (!string.IsNullOrWhiteSpace(port))
+                            {
+                                usbPorts.Add(port);
+                            }
+                        }
+                        return usbPorts.OrderBy(x => x).ToArray();
+                    }
+                }
+                catch { }
+            }
             return SerialPort.GetPortNames().OrderBy(x => x).ToArray();
         }
         catch
@@ -100,11 +129,20 @@ public class Esp8266UsbSerialTransport : ICanTransport
         string[] portsToTry;
         if (!string.IsNullOrWhiteSpace(_preferredPort))
         {
-            portsToTry = new[] { _preferredPort }.Concat(ports.Where(p => p != _preferredPort)).ToArray();
+            portsToTry = new[] { _preferredPort }.Concat(ports.Where(p => !p.Equals(_preferredPort, StringComparison.OrdinalIgnoreCase))).ToArray();
         }
         else
         {
-            portsToTry = ports;
+            portsToTry = ports.OrderByDescending(p => p.Equals("COM14", StringComparison.OrdinalIgnoreCase)).ToArray();
+        }
+
+        if (portsToTry.Length == 0)
+        {
+            lock (_lock)
+            {
+                _lastError = "No USB Serial hardware detected (e.g. COM14 ESP8266). Operating in passive mode.";
+            }
+            return Task.FromResult(false);
         }
 
         foreach (var port in portsToTry)
@@ -433,7 +471,7 @@ public class Esp8266UsbSerialTransport : ICanTransport
                 if (BinaryPacketDecoder.TryDecode(buf.AsSpan(0, 20), out var frame))
                 {
                     frame.SourceId = "ESP8266 + MCP2515 Gateway";
-                    frame.Channel = 0;
+                    frame.Channel = Channel;
                     Interlocked.Increment(ref _rxFrameCount);
                     Interlocked.Increment(ref _windowFrames);
                     _lastSeenUtc = DateTime.UtcNow;

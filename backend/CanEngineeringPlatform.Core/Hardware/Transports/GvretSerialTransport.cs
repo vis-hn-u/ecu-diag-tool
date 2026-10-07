@@ -170,6 +170,32 @@ public class GvretSerialTransport : ICanTransport
     {
         try
         {
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(@"HARDWARE\DEVICEMAP\SERIALCOMM");
+                    if (key != null)
+                    {
+                        var usbPorts = new List<string>();
+                        foreach (var valueName in key.GetValueNames())
+                        {
+                            if (valueName.Contains("Bth", StringComparison.OrdinalIgnoreCase) ||
+                                valueName.Contains("Bluetooth", StringComparison.OrdinalIgnoreCase))
+                            {
+                                continue;
+                            }
+                            var port = key.GetValue(valueName)?.ToString();
+                            if (!string.IsNullOrWhiteSpace(port))
+                            {
+                                usbPorts.Add(port);
+                            }
+                        }
+                        return usbPorts.OrderBy(x => x).ToArray();
+                    }
+                }
+                catch { }
+            }
             return SerialPort.GetPortNames().OrderBy(x => x).ToArray();
         }
         catch
@@ -202,7 +228,7 @@ public class GvretSerialTransport : ICanTransport
 
         if (portsToTry.Length == 0)
         {
-            _lastError = "No serial COM ports found.";
+            _lastError = "No USB Serial hardware detected (e.g. COM8 Arduino Nano). Operating in passive mode.";
             return Task.FromResult(false);
         }
 
@@ -237,6 +263,12 @@ public class GvretSerialTransport : ICanTransport
                 _keepaliveTask = Task.Run(() => KeepaliveLoopAsync(_cts.Token));
                 NotifyStatusChanged();
                 return Task.FromResult(true);
+            }
+            catch (ArgumentException)
+            {
+                // Port does not support high UART baud rate (e.g. legacy/virtual port)
+                _serialPort?.Dispose();
+                _serialPort = null;
             }
             catch (Exception ex)
             {

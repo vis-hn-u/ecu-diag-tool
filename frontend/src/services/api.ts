@@ -1,5 +1,5 @@
 import { 
-  DbcDatabaseInfo, GatewayStatus, HardwareStatus, HardwareTransportInfo, LogSession, NetworkTopologyState, ReplayStatus, TopologyMode,
+  DbcDatabaseInfo, DbcLibraryItem, GatewayStatus, HardwareStatus, HardwareTransportInfo, LogSession, NetworkTopologyState, ReplayStatus, TopologyMode,
   VehicleProfile, CalculatedSignalDefinition, ParameterMetadata, EngineeringSession, EngineeringRun,
   CanonicalLogDataSet, LogImportResult, LogValidationReport, ProcessingOptions, TimeSeriesChannel, RunComparisonResult, ComparisonAlignmentMode,
   EcuFamilyProfile, EcuProtocolCapabilityMatrix, EcuIdentificationProfile,
@@ -263,6 +263,34 @@ export const api = {
       return null;
     }
   },
+  enableDualHardwareStreaming: async (gvretPort = 'COM8'): Promise<any> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/dual-connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ portName: gvretPort })
+      });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
+  connectHardwareTransport: async (transportId: string): Promise<any> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/connect/${transportId}`, { method: 'POST' });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
+  disconnectHardwareTransport: async (transportId: string): Promise<any> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/disconnect/${transportId}`, { method: 'POST' });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
 
   // Vehicle Profile Management
   getVehicleProfiles: async (): Promise<VehicleProfile[]> => {
@@ -377,6 +405,23 @@ export const api = {
   getActiveDbc: async (): Promise<DbcDatabaseInfo> => {
     const res = await fetch(`${API_BASE}/dbc/active`);
     return res.json();
+  },
+  getDbcLibrary: async (): Promise<DbcLibraryItem[]> => {
+    try {
+      const res = await fetch(`${API_BASE}/dbc/library`);
+      if (!res.ok) return [];
+      return await res.json();
+    } catch {
+      return [];
+    }
+  },
+  loadDbcFromLibrary: async (key: string): Promise<any> => {
+    const res = await fetch(`${API_BASE}/dbc/load/${key}`, { method: 'POST' });
+    return res.json();
+  },
+  getDbcContent: async (key: string): Promise<string> => {
+    const res = await fetch(`${API_BASE}/dbc/library/${key}/content`);
+    return res.text();
   },
   uploadDbc: async (file: File): Promise<any> => {
     const formData = new FormData();
@@ -505,6 +550,12 @@ export const api = {
     const res = await fetch(`${API_BASE}/diagnostics/dtcs`);
     return res.json();
   },
+  scanAllDtcs: async (isSimulation: boolean = true): Promise<DiagnosticTroubleCode[]> => {
+    const res = await fetch(`${API_BASE}/diagnostics/scan-all-dtcs?isSimulation=${isSimulation}`, {
+      method: 'POST'
+    });
+    return res.json();
+  },
   clearDtcs: async (requestCanId: number = 0x7E0, ecuName: string = "ECM", isSimulation: boolean = true): Promise<any> => {
     const res = await fetch(`${API_BASE}/diagnostics/clear-dtcs?requestCanId=${requestCanId}&ecuName=${ecuName}&isSimulation=${isSimulation}`, {
       method: 'POST'
@@ -595,7 +646,6 @@ export const api = {
     return res.json();
   },
 
-  // Measurement-Based Road Dyno System
   runRoadDyno: async (payload: {
     name?: string;
     gear: number;
@@ -606,11 +656,29 @@ export const api = {
     coastDown?: CoastDownProfile | null;
     samples: RoadDynoSample[];
   }): Promise<RoadDynoRun> => {
+    const standardMap: Record<string, number> = {
+      'Uncorrected': 0,
+      'SAE_J1349': 1,
+      'DIN_70020': 2,
+      'EWG_80_1269': 3,
+      'ISO_1585': 4
+    };
+    const standardVal = typeof payload.standard === 'number'
+      ? payload.standard
+      : (standardMap[payload.standard] ?? 1);
+
     const res = await fetch(`${API_BASE}/dyno/road-run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        ...payload,
+        standard: standardVal
+      })
     });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || err.message || `Dyno calculation failed with status ${res.status}`);
+    }
     return res.json();
   },
   detectRoadDynoPulls: async (payload: {
@@ -896,7 +964,7 @@ export const api = {
     const res = await fetch(url);
     return res.json();
   },
-  getManufacturerSnapshot: async (oem: ManufacturerOem = 'VAG', rpm: number = 2500, boostBar: number = 0.5, loadPct: number = 45.0): Promise<DecodedManufacturerValue[]> => {
+  getManufacturerSnapshot: async (oem: ManufacturerOem = 'MarutiMarelli', rpm: number = 2500, boostBar: number = 0.5, loadPct: number = 45.0): Promise<DecodedManufacturerValue[]> => {
     const res = await fetch(`${API_BASE}/diagnostics/manufacturer/snapshot?oem=${oem}&rpm=${rpm}&boostBar=${boostBar}&loadPct=${loadPct}`);
     return res.json();
   },

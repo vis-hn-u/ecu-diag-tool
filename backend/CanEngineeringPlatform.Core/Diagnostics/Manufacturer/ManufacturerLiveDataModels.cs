@@ -6,6 +6,7 @@ namespace CanEngineeringPlatform.Core.Diagnostics.Manufacturer;
 public enum ManufacturerOem
 {
     Generic,
+    MarutiMarelli, // Maruti Suzuki Swift Diesel (Magneti Marelli MJD)
     VAG,        // Volkswagen, Audi, Seat, Skoda, Porsche
     BMW,        // BMW, Mini, Rolls-Royce
     Ford,       // Ford, Lincoln

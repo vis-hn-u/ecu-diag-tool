@@ -20,7 +20,7 @@ public class OemNormalizationPlan
 {
     public string PlanId { get; set; } = Guid.NewGuid().ToString("N");
     public string EcuName { get; set; } = "ECM";
-    public string EcuFamily { get; set; } = "Bosch MED17.5";
+    public string EcuFamily { get; set; } = "Magneti Marelli MJD";
     public DateTime CreatedUtc { get; set; } = DateTime.UtcNow;
     public bool MeetsAllOemTargets => Discrepancies.Count == 0;
     public List<OemTargetParameter> EvaluatedParameters { get; set; } = new();

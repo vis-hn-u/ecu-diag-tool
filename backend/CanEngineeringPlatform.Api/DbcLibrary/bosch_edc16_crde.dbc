@@ -1,0 +1,42 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 640 Engine_Data_1_0x280: 8 ECM
+ SG_ EngineTorque : 0|8@1+ (1,-100) [-100|400] "Nm" ABS,CLUSTER
+ SG_ DriverDemandTorque : 8|8@1+ (1,-100) [-100|400] "Nm" ABS
+ SG_ EngineRPM : 16|16@1+ (0.25,0) [0|6000] "rpm" CLUSTER,ABS
+ SG_ ThrottlePosition : 32|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ BrakeSwitch : 40|1@1+ (1,0) [0|1] "" ECM
+ SG_ ClutchSwitch : 41|1@1+ (1,0) [0|1] "" ECM
+ SG_ EngineRunningState : 48|8@1+ (1,0) [0|255] "" CLUSTER
+
+BO_ 648 Engine_Data_2_0x288: 8 ECM
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] "km/h" CLUSTER,BCM
+ SG_ AcceleratorPedalPosition : 16|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ EngineTorqueLoss : 24|8@1+ (1,0) [0|255] "Nm" ABS
+ SG_ GlowPlugActive : 32|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ AcCompressorRequest : 33|1@1+ (1,0) [0|1] "" BCM
+ SG_ RadiatorFanRequest : 40|8@1+ (0.392157,0) [0|100] "%" BCM
+
+BO_ 896 Thermal_Pressures_0x380: 8 ECM
+ SG_ EngineCoolantTemp : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ FuelTemperature : 8|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ CommonRailPressure : 16|16@1+ (0.1,0) [0|1800] "bar" CLUSTER
+ SG_ TargetRailPressure : 32|16@1+ (0.1,0) [0|1800] "bar" CLUSTER
+ SG_ IntakeAirTemp : 48|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ AtmosphericPressure : 56|8@1+ (2,0) [0|2000] "hPa" CLUSTER
+
+BO_ 1152 Boost_Injection_0x480: 8 ECM
+ SG_ BoostPressureActual : 0|16@1+ (0.1,0) [0|400] "kPa" CLUSTER
+ SG_ BoostPressureTarget : 16|16@1+ (0.1,0) [0|400] "kPa" CLUSTER
+ SG_ MainInjectionQuantity : 32|16@1+ (0.01,0) [0|150] "mg/hub" CLUSTER
+ SG_ PilotInjectionQuantity : 48|8@1+ (0.01,0) [0|15] "mg/hub" CLUSTER
+ SG_ EgrDutyCycle : 56|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+
+BO_ 1408 Diagnostics_Status_0x580: 8 ECM
+ SG_ MilLampStatus : 0|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ WaterInFuelWarning : 1|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ BatteryVoltage : 8|8@1+ (0.1,0) [0|25] "V" CLUSTER
+ SG_ DtcCount : 16|8@1+ (1,0) [0|255] "" CLUSTER
+ SG_ FuelConsumptionRate : 24|16@1+ (0.05,0) [0|100] "l/h" CLUSTER

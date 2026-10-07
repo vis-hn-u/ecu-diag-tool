@@ -252,6 +252,21 @@ export const HardwareManagerPage: React.FC = () => {
     }
   };
 
+  const [dualStreamingLoading, setDualStreamingLoading] = useState(false);
+  const handleEnableDualStreaming = async () => {
+    setDualStreamingLoading(true);
+    try {
+      await api.enableDualHardwareStreaming(gvretPort || 'COM8');
+      await refreshHardwareStatus();
+      setSwitchMessage('Dual Hardware Streaming activated: Arduino Nano (COM8) + ESP8266 (COM14)');
+    } catch {
+      setSwitchMessage('Failed to activate dual hardware streaming');
+    } finally {
+      setDualStreamingLoading(false);
+      setTimeout(() => setSwitchMessage(null), 4000);
+    }
+  };
+
   const handleSaveElmConfig = async () => {
     setSavingElm(true);
     try {
@@ -352,6 +367,15 @@ export const HardwareManagerPage: React.FC = () => {
               {switchMessage}
             </span>
           )}
+          <button
+            onClick={handleEnableDualStreaming}
+            disabled={dualStreamingLoading}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-amber-600/20 border border-amber-500/40 text-amber-300 hover:text-white hover:bg-amber-600/30 transition-colors font-semibold"
+            title="Ingest CAN traffic from both Arduino Nano and ESP8266 simultaneously"
+          >
+            <GitBranch className="w-3.5 h-3.5" />
+            <span>{dualStreamingLoading ? 'CONNECTING...' : 'DUAL STREAM: NANO + ESP'}</span>
+          </button>
           <button
             onClick={() => refreshHardwareStatus()}
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded bg-can-bg border border-can-border text-slate-300 hover:text-white hover:border-slate-500 transition-colors"

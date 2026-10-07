@@ -236,7 +236,8 @@ public class HardwareController : ControllerBase
         {
             if (!string.IsNullOrWhiteSpace(request.PortName))
             {
-                usbEsp.Configure(request.PortName);
+                byte ch = request.ActiveChannel.GetValueOrDefault(0);
+                usbEsp.Configure(request.PortName, ch);
             }
         }
         else if (transport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
@@ -248,5 +249,30 @@ public class HardwareController : ControllerBase
         }
 
         return Ok(transport.GetStatus());
+    }
+
+    [HttpPost("dual-connect")]
+    public async Task<IActionResult> EnableDualConnect([FromBody] ConfigureTransportRequest? request)
+    {
+        string gvretPort = request?.PortName ?? "COM8";
+        string espPort = "COM14";
+        bool ok = await _hardwareManager.EnableDualHardwareStreamingAsync(gvretPort, espPort);
+        return Ok(new { success = ok, connectedTransports = _hardwareManager.GetConnectedTransports().Select(t => t.GetStatus()) });
+    }
+
+    [HttpPost("connect/{transportId}")]
+    public async Task<IActionResult> ConnectTransport(string transportId)
+    {
+        bool ok = await _hardwareManager.ConnectTransportAsync(transportId);
+        var transport = _hardwareManager.GetTransport(transportId);
+        return Ok(new { success = ok, status = transport?.GetStatus() });
+    }
+
+    [HttpPost("disconnect/{transportId}")]
+    public async Task<IActionResult> DisconnectTransport(string transportId)
+    {
+        bool ok = await _hardwareManager.DisconnectTransportAsync(transportId);
+        var transport = _hardwareManager.GetTransport(transportId);
+        return Ok(new { success = ok, status = transport?.GetStatus() });
     }
 }

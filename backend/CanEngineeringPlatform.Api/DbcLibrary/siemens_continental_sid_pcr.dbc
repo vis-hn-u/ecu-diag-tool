@@ -1,0 +1,35 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 384 EngineSpeed_Torque_0x180: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|6000] "rpm" CLUSTER,ABS
+ SG_ EngineTorqueDelivered : 16|16@1+ (0.1,-500) [-500|600] "Nm" ABS
+ SG_ InjectionQuantityMain : 32|16@1+ (0.01,0) [0|150] "mg/inj" CLUSTER
+ SG_ InjectionTimingStart : 48|8@1+ (0.25,-30) [-30|30] "deg" CLUSTER
+
+BO_ 528 RailPressure_FuelDelivery_0x210: 8 ECM
+ SG_ RailPressureActual : 0|16@1+ (0.1,0) [0|2000] "bar" CLUSTER
+ SG_ RailPressureTarget : 16|16@1+ (0.1,0) [0|2000] "bar" CLUSTER
+ SG_ FuelTemperature : 32|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ FuelDeliveryFlowActual : 40|16@1+ (0.1,0) [0|300] "l/h" CLUSTER
+
+BO_ 848 Turbo_Airflow_0x350: 8 ECM
+ SG_ TurboBoostPressure : 0|16@1+ (0.1,0) [0|350] "kPa" CLUSTER
+ SG_ TurboVntDutyCycle : 16|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ MassAirFlow_MAF : 24|16@1+ (0.1,0) [0|700] "kg/h" CLUSTER
+ SG_ IntakeAirTemperature : 40|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+
+BO_ 1056 Thermal_Cooling_0x420: 8 ECM
+ SG_ CoolantTemperature : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ EngineOilPressure : 8|8@1+ (0.05,0) [0|10] "bar" CLUSTER
+ SG_ RadiatorFanLowRequest : 16|1@1+ (1,0) [0|1] "" BCM
+ SG_ RadiatorFanHighRequest : 17|1@1+ (1,0) [0|1] "" BCM
+ SG_ AcCompressorCutout : 18|1@1+ (1,0) [0|1] "" BCM
+
+BO_ 1312 Emissions_DPF_0x520: 8 ECM
+ SG_ DpfPressureDelta : 0|16@1+ (0.1,0) [0|800] "mbar" CLUSTER
+ SG_ DpfSootLoad_Gram : 16|8@1+ (0.2,0) [0|50] "g" CLUSTER
+ SG_ EgtSensor1_PreCat : 24|16@1+ (0.1,-40) [-40|1000] "degC" CLUSTER
+ SG_ EgtSensor2_PreDpf : 40|16@1+ (0.1,-40) [-40|1000] "degC" CLUSTER
+ SG_ DpfRegenActive : 56|1@1+ (1,0) [0|1] "" CLUSTER

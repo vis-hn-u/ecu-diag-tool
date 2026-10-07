@@ -104,6 +104,122 @@ public class EcuDefinitionPackService : IEcuDefinitionPackService
 
     private void InitializePacks()
     {
+        // 0. Magneti Marelli MJD (Maruti Suzuki Swift Diesel 1.3 DDiS)
+        var marelliMjd = new EcuDefinitionPack
+        {
+            Id = "marelli_mjd_swift_ddis",
+            Name = "Magneti Marelli MJD (Swift Diesel 1.3 DDiS)",
+            TargetPlatform = "Maruti Suzuki Swift / Dzire / Ertiga 1.3L DDiS MultiJet",
+            HardwarePartNumber = "MJD 6F3.S1 / 8F3",
+            SoftwareVersion = "3422S167",
+            CalibrationId = "SWIFT_1.3_DDiS",
+            Author = "Magneti Marelli MJD DAMOS / A2L Reference",
+            Version = "1.0",
+            SupportedProtocols = new List<string> { "UDS (ISO 14229)", "KWP2000", "CAN ISO-TP" }
+        };
+
+        // Common Rail Pressure Target Map (RPM x Injected Quantity)
+        double[] mjdRailRpm = new double[] { 800, 1200, 1600, 2000, 2500, 3000, 3500, 4000, 4500 };
+        double[] mjdRailIq = new double[] { 5, 10, 15, 20, 30, 40, 50, 60 };
+        double[][] mjdRailData = new double[mjdRailIq.Length][];
+        for (int y = 0; y < mjdRailIq.Length; y++)
+        {
+            mjdRailData[y] = new double[mjdRailRpm.Length];
+            for (int x = 0; x < mjdRailRpm.Length; x++)
+            {
+                // MultiJet rail pressure: 250-300 bar idle up to 1400-1600 bar under full load
+                double baseBar = 250.0 + (mjdRailRpm[x] * 0.18);
+                double loadBar = mjdRailIq[y] * 14.5;
+                mjdRailData[y][x] = Math.Round(Math.Min(1600.0, Math.Max(250.0, baseBar + loadBar)), 0);
+            }
+        }
+
+        marelliMjd.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "MJD_RailPressure",
+            Name = "Rail Pressure Target (Common Rail)",
+            Category = MapCategory.Fuel,
+            Description = "Desired common rail fuel pressure across engine speed and injected fuel volume",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x0012C400",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = mjdRailRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Injected Quantity", Unit = "mm³/stk", Breakpoints = mjdRailIq },
+            ZData = mjdRailData,
+            ZUnit = "bar",
+            MinValue = 250.0,
+            MaxValue = 1600.0,
+            DecimalPrecision = 0,
+            HeatmapPalette = "turbo"
+        });
+
+        // Boost Target Map (RPM x Injected Quantity)
+        double[] mjdBoostRpm = new double[] { 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500 };
+        double[] mjdBoostIq = new double[] { 10, 20, 30, 40, 50, 60 };
+        double[][] mjdBoostData = new double[mjdBoostIq.Length][];
+        for (int y = 0; y < mjdBoostIq.Length; y++)
+        {
+            mjdBoostData[y] = new double[mjdBoostRpm.Length];
+            for (int x = 0; x < mjdBoostRpm.Length; x++)
+            {
+                double targetMbar = 1013.0 + (mjdBoostIq[y] > 15 ? (mjdBoostIq[y] - 15) * 26.5 : 0.0);
+                if (mjdBoostRpm[x] > 4000) targetMbar -= (mjdBoostRpm[x] - 4000) * 0.25;
+                mjdBoostData[y][x] = Math.Round(Math.Min(2350.0, Math.Max(1000.0, targetMbar)), 0);
+            }
+        }
+
+        marelliMjd.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "MJD_TargetBoost",
+            Name = "Turbocharger Target Boost Pressure",
+            Category = MapCategory.Boost,
+            Description = "Requested absolute boost pressure commanded by MJD ECM to VGT / wastegate actuator",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x00134820",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = mjdBoostRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Injected Quantity", Unit = "mm³/stk", Breakpoints = mjdBoostIq },
+            ZData = mjdBoostData,
+            ZUnit = "mbar",
+            MinValue = 980.0,
+            MaxValue = 2400.0,
+            DecimalPrecision = 0,
+            HeatmapPalette = "viridis"
+        });
+
+        // Driver Demand / Accelerator Pedal Map
+        double[] mjdPedalPct = new double[] { 0, 10, 25, 50, 75, 100 };
+        double[] mjdPedalRpm = new double[] { 800, 1500, 2200, 3000, 3800, 4500 };
+        double[][] mjdDriverWish = new double[mjdPedalPct.Length][];
+        for (int y = 0; y < mjdPedalPct.Length; y++)
+        {
+            mjdDriverWish[y] = new double[mjdPedalRpm.Length];
+            for (int x = 0; x < mjdPedalRpm.Length; x++)
+            {
+                double iqDemand = (mjdPedalPct[y] / 100.0) * 58.0;
+                if (mjdPedalRpm[x] > 4200) iqDemand *= Math.Max(0.0, 1.0 - ((mjdPedalRpm[x] - 4200) / 600.0));
+                mjdDriverWish[y][x] = Math.Round(iqDemand, 1);
+            }
+        }
+
+        marelliMjd.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "MJD_DriverWish",
+            Name = "Driver Wish (Pedal vs Injected Quantity)",
+            Category = MapCategory.Torque,
+            Description = "Driver torque demand translation from accelerator pedal percentage to fuel delivery",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x00118200",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = mjdPedalRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Pedal Position", Unit = "%", Breakpoints = mjdPedalPct },
+            ZData = mjdDriverWish,
+            ZUnit = "mm³/stk",
+            MinValue = 0.0,
+            MaxValue = 60.0,
+            DecimalPrecision = 1,
+            HeatmapPalette = "magma"
+        });
+
+        _packs.Add(marelliMjd);
+
         // 1. Bosch MED17.5 (VAG EA888 Gen2)
         var med17 = new EcuDefinitionPack
         {

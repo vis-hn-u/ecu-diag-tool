@@ -47,7 +47,7 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
   const [activeVagGroup, setActiveVagGroup] = useState<VagMeasuringGroup | null>(null);
   const [isVagPolling, setIsVagPolling] = useState<boolean>(false);
 
-  const [selectedOem, setSelectedOem] = useState<ManufacturerOem>('VAG');
+  const [selectedOem, setSelectedOem] = useState<ManufacturerOem>('MarutiMarelli');
   const [manufacturerDefs, setManufacturerDefs] = useState<ManufacturerLiveDataDefinition[]>([]);
   const [manufacturerSnapshot, setManufacturerSnapshot] = useState<DecodedManufacturerValue[]>([]);
 
@@ -63,6 +63,8 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
   const [selectedSession, setSelectedSession] = useState('01');
   const [selectedReset, setSelectedReset] = useState('01');
   const [isSending, setIsSending] = useState(false);
+  const [isScanningDtcs, setIsScanningDtcs] = useState(false);
+  const [dtcActionMessage, setDtcActionMessage] = useState<string | null>(null);
   const [isExportingDiagPdf, setIsExportingDiagPdf] = useState(false);
   const [isExportingHealthPdf, setIsExportingHealthPdf] = useState(false);
 
@@ -180,16 +182,38 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
     }
   };
 
+  const handleScanAllDtcs = async () => {
+    setIsScanningDtcs(true);
+    setDtcActionMessage('Scanning all ECUs across UDS 0x19, OBD Mode 03/07, and KWP2000...');
+    try {
+      const res = await api.scanAllDtcs(isSimulation);
+      setDtcs(res);
+      setDtcActionMessage(`Multi-protocol scan complete: ${res.length} active DTC(s) detected.`);
+      await fetchAllDiagnosticsData();
+    } catch {
+      setDtcActionMessage('DTC scan failed or transport timeout.');
+    } finally {
+      setIsScanningDtcs(false);
+      setTimeout(() => setDtcActionMessage(null), 5000);
+    }
+  };
+
   const handleClearDtcs = async () => {
     setIsSending(true);
+    setDtcActionMessage(`Transmitting clear commands (UDS 0x14 FF FF FF & OBD-II Mode 04) to ${targetEcu}...`);
     try {
       const reqId = ecuCanIdMap[targetEcu] || 0x7E0;
       await api.clearDtcs(reqId, targetEcu, isSimulation);
+      await new Promise(r => setTimeout(r, 600));
+      const refreshed = await api.getActiveDtcs();
+      setDtcs(refreshed);
+      setDtcActionMessage(`Clear command acknowledged! Active fault codes: ${refreshed.length}`);
       await fetchAllDiagnosticsData();
     } catch {
-      // Ignore
+      setDtcActionMessage('Clear DTC command rejected or communication error.');
     } finally {
       setIsSending(false);
+      setTimeout(() => setDtcActionMessage(null), 5000);
     }
   };
 
@@ -439,20 +463,33 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
               </div>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => handleSendCustomHex('19 02 FF')}
-                  className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold"
+                  onClick={handleScanAllDtcs}
+                  disabled={isScanningDtcs || isSending}
+                  className="px-3.5 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow"
+                  title="Scan ECM, ABS, BCM across UDS 0x19 02 FF, OBD-II Mode 03/07, and KWP2000"
                 >
-                  Poll Stored DTCs
+                  <Search className="w-3.5 h-3.5" />
+                  <span>{isScanningDtcs ? 'Scanning Protocols...' : 'Scan All DTCs (UDS + OBD)'}</span>
                 </button>
                 <button
                   onClick={handleClearDtcs}
-                  className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-bold flex items-center space-x-1"
+                  disabled={isSending || isScanningDtcs}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow"
+                  title="Purge NVRAM fault codes using UDS 0x14 FF FF FF and OBD-II Mode 04"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Clear All Faults (0x14)</span>
+                  <span>{isSending ? 'Clearing Faults...' : 'Clear All Faults (0x14 + Mode 04)'}</span>
                 </button>
               </div>
             </div>
+
+            {/* DTC Action Notification Banner */}
+            {dtcActionMessage && (
+              <div className="p-3 bg-sky-950/60 border border-sky-500/40 rounded-lg flex items-center space-x-2.5 text-xs text-sky-300 font-mono animate-fadeIn">
+                <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>{dtcActionMessage}</span>
+              </div>
+            )}
 
             {/* DTC Cards Grid */}
             <div className="grid grid-cols-2 gap-3">
@@ -676,6 +713,7 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                   onChange={e => setSelectedOem(e.target.value as any)}
                   className="bg-can-bg border border-can-border rounded px-3 py-1.5 text-white font-bold text-sky-400"
                 >
+                  <option value="MarutiMarelli">Maruti Suzuki Swift Diesel (Magneti Marelli MJD)</option>
                   <option value="VAG">VAG (VW, Audi, Seat, Skoda, Porsche)</option>
                   <option value="BMW">BMW / Mini</option>
                   <option value="Ford">Ford / Lincoln</option>

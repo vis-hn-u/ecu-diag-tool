@@ -65,8 +65,8 @@ public class CalibrationProject
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
     public string Name { get; set; } = "Stage 1 Performance Calibration";
-    public string VehicleModel { get; set; } = "2.0L Turbo Inline-4";
-    public string EcuType { get; set; } = "MED17 / Bosch CAN";
+    public string VehicleModel { get; set; } = "Swift Diesel 1.3 DDiS";
+    public string EcuType { get; set; } = "Magneti Marelli MJD";
     public string Version { get; set; } = "v1.2.0-tune";
     public DateTime LastModifiedUtc { get; set; } = DateTime.UtcNow;
     public List<CalibrationTable> Tables { get; set; } = new();

@@ -1,0 +1,36 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 276 Tata_Powertrain_0x114: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|6000] "rpm" CLUSTER,ABS
+ SG_ EngineTorque : 16|16@1+ (0.1,-500) [-500|600] "Nm" ABS
+ SG_ AcceleratorPosition : 32|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ DriveModeSelected : 40|4@1+ (1,0) [0|3] "" CLUSTER
+ SG_ EngineStatus : 44|4@1+ (1,0) [0|15] "" CLUSTER
+
+BO_ 532 Tata_VehicleSpeed_ABS_0x214: 8 ABS
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] "km/h" ECM,CLUSTER
+ SG_ WheelSpeed_FL : 16|16@1+ (0.01,0) [0|250] "km/h" CLUSTER
+ SG_ WheelSpeed_FR : 32|16@1+ (0.01,0) [0|250] "km/h" CLUSTER
+ SG_ BrakeSwitch : 48|1@1+ (1,0) [0|1] "" ECM
+ SG_ ClutchSwitch : 49|1@1+ (1,0) [0|1] "" ECM
+ SG_ TractionControlActive : 50|1@1+ (1,0) [0|1] "" CLUSTER
+
+BO_ 788 Tata_Thermal_0x314: 8 ECM
+ SG_ CoolantTemperature : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ EngineOilTemperature : 8|8@1+ (1,-40) [-40|160] "degC" CLUSTER
+ SG_ FuelTemperature : 16|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ AmbientTemperature : 24|8@1+ (0.5,-40) [-40|85] "degC" CLUSTER
+
+BO_ 804 Tata_Pressures_0x324: 8 ECM
+ SG_ CommonRailPressure : 0|16@1+ (0.1,0) [0|2200] "bar" CLUSTER
+ SG_ TurboBoostPressure : 16|16@1+ (0.1,0) [0|400] "kPa" CLUSTER
+ SG_ FuelLevelPercent : 32|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ BatteryVoltage : 40|8@1+ (0.1,0) [0|25] "V" CLUSTER
+
+BO_ 1300 Tata_BS6_DPF_DEF_0x514: 8 ECM
+ SG_ DefAdBlueLevel : 0|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ DpfSootLoad : 8|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ DpfRegenerationActive : 16|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ ServiceIntervalWarning : 17|1@1+ (1,0) [0|1] "" CLUSTER

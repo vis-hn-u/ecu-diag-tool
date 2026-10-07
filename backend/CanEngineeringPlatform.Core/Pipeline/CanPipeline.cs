@@ -22,6 +22,7 @@ public interface ICanPipeline
 {
     ValueTask PublishFrameAsync(CanFrame frame);
     void SetActiveDbc(DbcDatabase? dbc);
+    void ResetDefaultDbc();
     DbcDatabase? GetActiveDbc();
     event Action<CanFrame>? OnFrameReceived;
     event Action<IReadOnlyList<DecodedSignal>>? OnSignalsDecoded;
@@ -75,6 +76,10 @@ public class CanPipeline : ICanPipeline, IDisposable
             SingleReader = true
         });
 
+        // Preload authoritative Magneti Marelli MJD (Swift DDiS) DBC by default
+        // Ensures live signals decode and print immediately upon hardware connection
+        SetActiveDbc(GetDefaultMarelliSwiftDbc());
+
         _cts = new CancellationTokenSource();
         _processingTask = Task.Run(ProcessQueueAsync);
     }
@@ -101,12 +106,71 @@ public class CanPipeline : ICanPipeline, IDisposable
         }
     }
 
+    public void ResetDefaultDbc()
+    {
+        SetActiveDbc(GetDefaultMarelliSwiftDbc());
+    }
+
     public DbcDatabase? GetActiveDbc()
     {
         lock (_dbcLock)
         {
             return _activeDbc;
         }
+    }
+
+    public static DbcDatabase GetDefaultMarelliSwiftDbc()
+    {
+        const string dbcContent = @"VERSION ""1.0""
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 292 Engine_0x124: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|8000] ""rpm"" CLUSTER,ABS
+ SG_ ThrottlePosition : 16|8@1+ (0.392157,0) [0|100] ""%"" CLUSTER
+ SG_ EngineTorque : 24|8@1+ (1,-100) [-100|400] ""Nm"" ABS
+ SG_ EngineStatus : 32|8@1+ (1,0) [0|255] """" CLUSTER
+ SG_ AcceleratorPedal : 40|8@1+ (0.392157,0) [0|100] ""%"" CLUSTER
+
+BO_ 784 Speed_0x310: 8 ABS
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] ""km/h"" ECM,CLUSTER
+ SG_ BrakeSwitch : 16|1@1+ (1,0) [0|1] """" ECM
+ SG_ ClutchSwitch : 17|1@1+ (1,0) [0|1] """" ECM
+ SG_ WheelSpeedFL : 24|16@1+ (0.01,0) [0|250] ""km/h"" CLUSTER
+ SG_ WheelSpeedFR : 40|16@1+ (0.01,0) [0|250] ""km/h"" CLUSTER
+
+BO_ 788 Thermal_0x314: 8 ECM
+ SG_ EngineCoolantTemp : 0|8@1+ (1,-40) [-40|150] ""degC"" CLUSTER
+ SG_ FuelTemperature : 8|8@1+ (1,-40) [-40|120] ""degC"" CLUSTER
+ SG_ AmbientAirTemp : 16|8@1+ (0.5,-40) [-40|85] ""degC"" CLUSTER
+ SG_ OilTemperature : 24|8@1+ (1,-40) [-40|160] ""degC"" CLUSTER
+
+BO_ 792 Pressure_Relays_0x318: 8 ECM
+ SG_ FuelRailPressure : 0|16@1+ (0.1,0) [0|2000] ""bar"" CLUSTER
+ SG_ BoostPressure : 16|16@1+ (0.1,0) [0|350] ""kPa"" CLUSTER
+ SG_ AcRelayStatus : 32|1@1+ (1,0) [0|1] """" CLUSTER
+ SG_ RadiatorFanRelay : 33|1@1+ (1,0) [0|1] """" CLUSTER
+ SG_ GlowPlugRelay : 34|1@1+ (1,0) [0|1] """" CLUSTER
+ SG_ BatteryVoltage : 40|8@1+ (0.1,0) [0|25] ""V"" CLUSTER
+
+BO_ 1852 BCM_Immo_0x73C: 8 BCM
+ SG_ ImmobilizerStatus : 0|8@1+ (1,0) [0|255] """" ECM
+ SG_ KeyStatus : 8|8@1+ (1,0) [0|255] """" ECM
+ SG_ BodyWarningState : 16|8@1+ (1,0) [0|255] """" ECM
+
+BO_ 280 EngineData_Sim: 8 ECM
+ SG_ EngineSpeed_Sim : 0|16@1+ (0.125,0) [0|8000] ""rpm"" CLUSTER,BCM,ABS
+ SG_ EngineTorque_Sim : 16|8@1+ (1,-100) [-100|155] ""Nm"" ABS
+ SG_ ThrottlePosition_Sim : 24|8@1+ (0.392,0) [0|100] ""%"" CLUSTER
+ SG_ EngineCoolantTemp_Sim : 32|8@1+ (1,-40) [-40|215] ""degC"" CLUSTER
+ SG_ FuelRailPressure_Sim : 40|16@1+ (0.1,0) [0|3000] ""bar"" CLUSTER
+
+BO_ 390 VehicleDynamics_Sim: 8 ABS
+ SG_ VehicleSpeed_Sim : 0|16@1+ (0.01,0) [0|250] ""km/h"" ECM,CLUSTER,BCM
+ SG_ BrakePressure_Sim : 16|8@1+ (1,0) [0|250] ""bar"" ECM
+ SG_ AbsActive_Sim : 44|1@1+ (1,0) [0|1] """" CLUSTER
+";
+        return DbcParser.Parse(dbcContent);
     }
 
     private async Task ProcessQueueAsync()

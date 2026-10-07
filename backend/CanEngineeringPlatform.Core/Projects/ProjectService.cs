@@ -37,30 +37,30 @@ public class ProjectService : IProjectService
         var defaultProject = new EngineeringProject
         {
             Id = "proj-default-oem",
-            Name = "VAG EA888 Gen3 Calibration & Diagnostics",
-            Description = "Full bench and vehicle engineering workspace for Bosch MED17.5.5 / MED17.5.21 ECM and DQ250 TCM.",
+            Name = "Maruti Suzuki Swift DDiS Calibration & Diagnostics",
+            Description = "Full bench and vehicle engineering workspace for Magneti Marelli MJD 6F3 / 8F3 ECM (Swift 1.3L DDiS MultiJet).",
             CreatedBy = "Antigravity Engineering System",
             Vehicle = new ProjectVehicleInfo
             {
-                Vin = "WVWZZZ3CZWE123456",
-                Make = "Volkswagen AG",
-                Model = "Golf R / S3 MQB",
-                Year = 2021,
-                EngineCode = "CJXC 2.0 TSI",
-                Transmission = "DQ250 6-Speed DSG",
-                Architecture = "CAN FD / High-Speed CAN Gateway"
+                Vin = "MA3EFA12S00123456",
+                Make = "Maruti Suzuki",
+                Model = "Swift 1.3 DDiS (MJD 6F3/8F3)",
+                Year = 2015,
+                EngineCode = "D13A / MultiJet",
+                Transmission = "5-Speed Manual",
+                Architecture = "High-Speed CAN Gateway (500 kbps)"
             },
             EcuTarget = new ProjectEcuTarget
             {
                 EcuName = "ECM",
-                Family = "Bosch MED17.5.5",
-                HardwareNumber = "06K907425B",
-                SoftwareNumber = "06K906007AM",
+                Family = "Magneti Marelli MJD",
+                HardwareNumber = "MJD 6F3.S1 / 8F3",
+                SoftwareNumber = "3422S167",
                 RequestCanId = 0x7E0,
                 ResponseCanId = 0x7E8,
                 Protocol = "UDS on ISO-TP (11-bit)",
-                McuFamily = "Infineon TriCore TC1793",
-                FlashSizeBytes = 4194304
+                McuFamily = "PowerPC MPC5565 / MPC5634",
+                FlashSizeBytes = 2097152
             },
             Hardware = new ProjectHardwareConfig
             {
@@ -68,7 +68,7 @@ public class ProjectService : IProjectService
                 NominalBaudRate = 500000,
                 ListenOnly = false
             },
-            Tags = new List<string> { "VAG", "MED17", "MQB", "UDS", "Stage 1 Benchmark" }
+            Tags = new List<string> { "Maruti", "Swift", "Magneti Marelli", "MJD", "DDiS", "UDS" }
         };
 
         _projects[defaultProject.Id] = defaultProject;

@@ -1,0 +1,13 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER SCANTOOL
+
+BO_ 2024 OBD2_ECM_Response_0x7E8: 8 ECM
+ SG_ EngineRPM : 24|16@1+ (0.25,0) [0|8000] "rpm" SCANTOOL
+ SG_ VehicleSpeed : 24|8@1+ (1,0) [0|255] "km/h" SCANTOOL
+ SG_ CoolantTemperature : 24|8@1+ (1,-40) [-40|215] "degC" SCANTOOL
+ SG_ ThrottlePosition : 24|8@1+ (0.392157,0) [0|100] "%" SCANTOOL
+ SG_ FuelRailPressure : 24|16@1+ (0.1,0) [0|3000] "bar" SCANTOOL
+ SG_ IntakeAirTemperature : 24|8@1+ (1,-40) [-40|215] "degC" SCANTOOL
+ SG_ CalculatedEngineLoad : 24|8@1+ (0.392157,0) [0|100] "%" SCANTOOL
+ SG_ ControlModuleVoltage : 24|16@1+ (0.001,0) [0|30] "V" SCANTOOL

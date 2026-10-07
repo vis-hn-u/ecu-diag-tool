@@ -69,15 +69,18 @@ public class EcuSimulator : IEcuSimulator
             Name = "ECM",
             RequestCanId = 0x7E0,
             ResponseCanId = 0x7E8,
-            Description = "Engine Control Module (Powertrain)",
+            Description = "Engine Control Module (Magneti Marelli MJD Swift Diesel)",
             Vin = "1FA6P8CF5H5123456",
-            HardwareNumber = "HW-ECM-8920A",
-            SoftwareVersion = "v4.2.1-prod",
-            SystemName = "2.0L Turbo Direct Injection"
+            HardwareNumber = "MJD 6F3.S1 / 8F3",
+            SoftwareVersion = "3422S167",
+            SystemName = "Magneti Marelli MJD (Swift Diesel 1.3 DDiS)"
         };
         ecm.DataIdentifiers[0xF190] = Encoding.ASCII.GetBytes(ecm.Vin);
         ecm.DataIdentifiers[0xF18A] = Encoding.ASCII.GetBytes(ecm.HardwareNumber);
+        ecm.DataIdentifiers[0xF191] = Encoding.ASCII.GetBytes(ecm.HardwareNumber);
         ecm.DataIdentifiers[0xF189] = Encoding.ASCII.GetBytes(ecm.SoftwareVersion);
+        ecm.DataIdentifiers[0xF194] = Encoding.ASCII.GetBytes(ecm.SoftwareVersion);
+        ecm.DataIdentifiers[0xF187] = Encoding.ASCII.GetBytes("33920-84E00");
         ecm.DataIdentifiers[0xF197] = Encoding.ASCII.GetBytes(ecm.SystemName);
         ecm.DataIdentifiers[0xF186] = new byte[] { 0x01 }; // Default session
         ecm.DataIdentifiers[0x0100] = new byte[] { 0x07, 0xD0 }; // RPM = 2000 (0x07D0)
@@ -92,6 +95,7 @@ public class EcuSimulator : IEcuSimulator
         ecm.DataIdentifiers[0x0109] = new byte[] { 0x41 }; // Speed = 65 km/h
         ecm.DataIdentifiers[0x010A] = new byte[] { 0x41 }; // IAT = 25 C (65)
 
+        // Baseline DTCs for testing
         ecm.TroubleCodes.Add(new DiagnosticTroubleCode
         {
             Code = "P0300",
@@ -107,6 +111,53 @@ public class EcuSimulator : IEcuSimulator
             RawDtcNumber = 0x011500,
             StatusByte = 0x29,
             Description = "Engine Coolant Temperature Circuit Malfunction",
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+
+        // Magneti Marelli MJD (Maruti Suzuki Swift Diesel) Reference Scanner Faults
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0235",
+            RawDtcNumber = 0x023500,
+            StatusByte = 0x2F,
+            Description = "BOOST PRESSURE SENSOR CRT (Boost Pressure Sensor Circuit Malfunction)",
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0180",
+            RawDtcNumber = 0x018000,
+            StatusByte = 0x2F,
+            Description = "FUEL TEMP SEN CRT (Fuel Temperature Sensor A Circuit Malfunction)",
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P1530",
+            RawDtcNumber = 0x153000,
+            StatusByte = 0x2F,
+            Description = "A/C COMPRESSOR RELAY CIRCUIT (Air Conditioning Compressor Relay Circuit)",
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P1481",
+            RawDtcNumber = 0x148100,
+            StatusByte = 0x2F,
+            Description = "RAD FAN OUTPUT 1 CRT MALF (Radiator Fan Relay 1 Control Circuit)",
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0190",
+            RawDtcNumber = 0x019000,
+            StatusByte = 0x2F,
+            Description = "FUEL RAIL PRESS SENS CRT (Fuel Rail Pressure Sensor Circuit)",
             EcuName = "ECM",
             CanId = 0x7E8
         });

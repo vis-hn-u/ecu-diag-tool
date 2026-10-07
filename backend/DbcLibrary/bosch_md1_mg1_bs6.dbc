@@ -1,0 +1,40 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 256 EngineHighRate_0x100: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.125,0) [0|8000] "rpm" CLUSTER,ABS
+ SG_ ActualEngineTorque : 16|16@1+ (0.1,-500) [-500|800] "Nm" ABS
+ SG_ DriverDemandedTorque : 32|16@1+ (0.1,-500) [-500|800] "Nm" ABS
+ SG_ FrictionTorque : 48|8@1+ (1,0) [0|255] "Nm" ABS
+ SG_ ThrottlePedalPercent : 56|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+
+BO_ 512 VehicleMotion_0x200: 8 ABS
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|260] "km/h" ECM,CLUSTER
+ SG_ WheelSpeed_FL : 16|16@1+ (0.01,0) [0|260] "km/h" CLUSTER
+ SG_ WheelSpeed_FR : 32|16@1+ (0.01,0) [0|260] "km/h" CLUSTER
+ SG_ BrakeSwitchStatus : 48|1@1+ (1,0) [0|1] "" ECM
+ SG_ ClutchSwitchStatus : 49|1@1+ (1,0) [0|1] "" ECM
+ SG_ EspInterventionActive : 50|1@1+ (1,0) [0|1] "" CLUSTER
+
+BO_ 768 CommonRail_Airflow_0x300: 8 ECM
+ SG_ FuelRailPressure_Actual : 0|16@1+ (0.1,0) [0|2700] "bar" CLUSTER
+ SG_ FuelRailPressure_Target : 16|16@1+ (0.1,0) [0|2700] "bar" CLUSTER
+ SG_ IntakeManifoldPressure_MAP : 32|16@1+ (0.1,0) [0|450] "kPa" CLUSTER
+ SG_ AirMassFlow_MAF : 48|16@1+ (0.1,0) [0|800] "kg/h" CLUSTER
+
+BO_ 1024 Aftertreatment_BS6_SCR_0x400: 8 ECM
+ SG_ DefAdBlueTankLevel : 0|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ DefDosingRateActual : 8|16@1+ (0.1,0) [0|500] "mg/s" CLUSTER
+ SG_ ScrCatalystTemp : 24|16@1+ (0.1,-40) [-40|850] "degC" CLUSTER
+ SG_ DpfDifferentialPressure : 40|16@1+ (0.1,0) [0|800] "mbar" CLUSTER
+ SG_ DpfSootLoadPercent : 56|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+
+BO_ 1280 Thermal_Diagnostics_0x500: 8 ECM
+ SG_ EngineCoolantTemp : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ EngineOilTemp : 8|8@1+ (1,-40) [-40|160] "degC" CLUSTER
+ SG_ FuelTemp : 16|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ BatteryVoltage : 24|8@1+ (0.1,0) [0|25] "V" CLUSTER
+ SG_ MilStatus : 32|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ ScrFaultWarning : 33|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ DpfRegenActive : 34|1@1+ (1,0) [0|1] "" CLUSTER

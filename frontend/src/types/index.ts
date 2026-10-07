@@ -152,9 +152,26 @@ export interface DbcMessage {
   isExtended: boolean;
 }
 
+export interface DbcLibraryItem {
+  key: string;
+  fileName: string;
+  title: string;
+  category: string;
+  description: string;
+  ecuFamily: string;
+  manufacturer: string;
+  protocol: string;
+  messageCount: number;
+  signalCount: number;
+  keySignals: string[];
+  nodes: string[];
+  isActive: boolean;
+}
+
 export interface DbcDatabaseInfo {
   isLoaded: boolean;
   version?: string;
+  activeKey?: string;
   nodeCount?: number;
   messageCount?: number;
   nodes?: { name: string; comment: string }[];
@@ -644,6 +661,24 @@ export interface EcuFamilyProfile {
   checksumAlgorithm: string;
   knownConstraints: string[];
   recoveryProcedures: string[];
+  hardwareNumberPatterns?: string[];
+  softwareNumberPatterns?: string[];
+  calIdPattern?: string;
+  cvnPattern?: string;
+  microprocessorFamily?: string;
+  instructionSet?: string;
+  coreClockMhz?: number;
+  externalFlashChip?: string;
+  eepromChip?: string;
+  supportedProtocols?: string[];
+  canAddressingType?: string;
+  functionalBroadcastCanId?: number;
+  klineProtocol?: string;
+  securityAccessLevels?: Record<string, string>;
+  benchPinout?: Record<string, string>;
+  programmingMethods?: string[];
+  bootPinDetails?: string;
+  bdmJtagDetails?: string;
   oemNormalLimits: Record<string, { min?: number; max?: number; unit?: string; item1?: number; item2?: number; item3?: string }>;
 }
 

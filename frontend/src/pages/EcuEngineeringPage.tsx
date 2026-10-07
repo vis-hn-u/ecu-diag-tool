@@ -95,7 +95,7 @@ export const EcuEngineeringPage: React.FC = () => {
   const [identificationProfile, setIdentificationProfile] = useState<EcuIdentificationProfile | null>(null);
   const [capabilityMatrix, setCapabilityMatrix] = useState<EcuProtocolCapabilityMatrix | null>(null);
   const [catalogProfiles, setCatalogProfiles] = useState<EcuFamilyProfile[]>([]);
-  const [selectedCatalogId, setSelectedCatalogId] = useState<string>('BOSCH_MED17_5_5');
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string>('MAGNETI_MARELLI_MJD');
   const [catalogSearch, setCatalogSearch] = useState('');
   const [activeEvidenceModal, setActiveEvidenceModal] = useState<EvidenceSource[] | null>(null);
 
@@ -166,6 +166,29 @@ export const EcuEngineeringPage: React.FC = () => {
       setStatusMessage({ text: `ECU '${profile.ecuName}' identification completed with ${profile.overallConfidence} confidence.` });
     } catch (err: any) {
       setStatusMessage({ text: `Identification failed: ${err.message}`, isError: true });
+    } finally {
+      setLoadingIdentify(false);
+    }
+  };
+
+  const handleLoadCatalogProfileToSession = async (profile: EcuFamilyProfile) => {
+    setSelectedCatalogId(profile.familyId);
+    setEcuName(profile.name);
+    setRequestCanIdHex(`0x${profile.defaultRequestCanId.toString(16).toUpperCase()}`);
+    setResponseCanIdHex(`0x${profile.defaultResponseCanId.toString(16).toUpperCase()}`);
+    setSubTab('identification');
+    setLoadingIdentify(true);
+    setStatusMessage(null);
+    try {
+      const p = await api.identifyEcu({
+        requestCanId: profile.defaultRequestCanId,
+        responseCanId: profile.defaultResponseCanId,
+        ecuName: profile.name
+      });
+      setIdentificationProfile(p);
+      setStatusMessage({ text: `Target ECU loaded: '${profile.name}' (${profile.mcuModel}). Microprocessor, protocols & pinouts active.` });
+    } catch (err: any) {
+      setStatusMessage({ text: `Target set to '${profile.name}'.`, isError: false });
     } finally {
       setLoadingIdentify(false);
     }
@@ -674,14 +697,39 @@ export const EcuEngineeringPage: React.FC = () => {
 
       {/* Tab 1: Identification */}
       {subTab === 'identification' && (
-
         <div className="space-y-4">
+          {/* Quick ECU Switcher Chips */}
+          <div className="bg-can-panel border border-can-border rounded-lg p-3 space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-400">
+              <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                Quick-Select Target ECU Platform (Auto-Binds Microprocessor, Protocols &amp; Pinout):
+              </span>
+              <span className="text-[11px] font-mono text-slate-500">{catalogProfiles.length} Verified Architectures</span>
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {catalogProfiles.slice(0, 10).map(prof => (
+                <button
+                  key={prof.familyId}
+                  onClick={() => handleLoadCatalogProfileToSession(prof)}
+                  className={`px-2.5 py-1 rounded text-[11px] font-mono font-medium border transition-colors ${
+                    identificationProfile?.ecuFamily.value === prof.name || ecuName === prof.name
+                      ? 'bg-sky-500/20 text-sky-300 border-sky-500/50'
+                      : 'bg-can-card text-slate-300 border-can-border hover:bg-slate-800'
+                  }`}
+                >
+                  {prof.name.split(' (')[0]}
+                </button>
+              ))}
+            </div>
+          </div>
+
           {!identificationProfile ? (
             <div className="p-8 text-center bg-can-panel border border-can-border rounded-lg space-y-3">
               <Cpu className="w-12 h-12 text-slate-600 mx-auto" />
               <div className="text-slate-300 font-semibold text-sm">No Active Identification Performed</div>
               <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Click <strong>"Identify ECU"</strong> to send non-destructive UDS identification queries.
+                Select an ECU platform above or click <strong>"Identify ECU"</strong> to query UDS identification DIDs (0xF190 VIN, 0xF191 HW, 0xF194 SW, 0xF189 Version).
               </p>
               <button
                 onClick={handleIdentifyEcu}
@@ -692,63 +740,154 @@ export const EcuEngineeringPage: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div className="bg-can-panel border border-can-border rounded-lg p-4 space-y-4">
-                <div className="flex items-center justify-between border-b border-can-border pb-3">
-                  <div>
-                    <h2 className="text-sm font-bold text-white">Module Identification: {identificationProfile.ecuName}</h2>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div className="bg-can-panel border border-can-border rounded-lg p-4 space-y-4">
+                  <div className="flex items-center justify-between border-b border-can-border pb-3">
+                    <div>
+                      <h2 className="text-sm font-bold text-white">Module Identification: {identificationProfile.ecuName}</h2>
+                      <p className="text-[11px] font-mono text-slate-400">
+                        CAN ID: 0x{identificationProfile.requestCanId.toString(16).toUpperCase()} / 0x{identificationProfile.responseCanId.toString(16).toUpperCase()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] text-slate-400 uppercase font-mono block">Overall Confidence</span>
+                      {renderConfidenceBadge(identificationProfile.overallConfidence)}
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    {renderFieldRow('Vehicle Identification Number (VIN)', identificationProfile.vin)}
+                    {renderFieldRow('ECU Part Number', identificationProfile.ecuPartNumber)}
+                    {renderFieldRow('ECU Hardware Number', identificationProfile.hardwareNumber)}
+                    {renderFieldRow('ECU Software Number', identificationProfile.softwareNumber)}
+                    {renderFieldRow('Software Version', identificationProfile.softwareVersion)}
+                    {renderFieldRow('Calibration ID', identificationProfile.calibrationId)}
+                    {renderFieldRow('ECU Family / Series', identificationProfile.ecuFamily)}
+                    {renderFieldRow('Manufacturer', identificationProfile.manufacturer)}
+                  </div>
+                </div>
+
+                <div className="bg-can-panel border border-can-border rounded-lg p-4 space-y-4">
+                  <div className="border-b border-can-border pb-3">
+                    <h2 className="text-sm font-bold text-white">Internal Architecture &amp; Network Profile</h2>
                     <p className="text-[11px] font-mono text-slate-400">
-                      CAN ID: 0x{identificationProfile.requestCanId.toString(16).toUpperCase()} / 0x{identificationProfile.responseCanId.toString(16).toUpperCase()}
+                      Microcontroller architecture and memory characteristics.
                     </p>
                   </div>
-                  <div className="text-right">
-                    <span className="text-[10px] text-slate-400 uppercase font-mono block">Overall Confidence</span>
-                    {renderConfidenceBadge(identificationProfile.overallConfidence)}
+
+                  <div className="space-y-1">
+                    {renderFieldRow('Microcontroller (MCU)', identificationProfile.mcuArchitecture)}
+                    {renderFieldRow('Memory Characteristics', identificationProfile.memoryCharacteristics)}
+                    {renderFieldRow('Diagnostic Protocol', identificationProfile.diagnosticProtocol)}
+                    {renderFieldRow('CAN Addressing Scheme', identificationProfile.canAddressing)}
+                    {renderFieldRow('CAN Nominal Bitrate', identificationProfile.canBitrate, 'bps')}
+                  </div>
+
+                  <div className="p-3 bg-can-card rounded border border-can-border flex items-center justify-between text-xs">
+                    <span className="text-slate-300">
+                      Evidence Citations: <strong>{identificationProfile.allEvidence.length}</strong>
+                    </span>
+                    {identificationProfile.allEvidence.length > 0 && (
+                      <button
+                        onClick={() => setActiveEvidenceModal(identificationProfile.allEvidence)}
+                        className="px-2.5 py-1 rounded bg-sky-600/20 text-sky-300 hover:bg-sky-600/30 font-medium"
+                      >
+                        Inspect Evidence Table
+                      </button>
+                    )}
                   </div>
                 </div>
-
-                <div className="space-y-1">
-                  {renderFieldRow('Vehicle Identification Number (VIN)', identificationProfile.vin)}
-                  {renderFieldRow('ECU Part Number', identificationProfile.ecuPartNumber)}
-                  {renderFieldRow('ECU Hardware Number', identificationProfile.hardwareNumber)}
-                  {renderFieldRow('ECU Software Number', identificationProfile.softwareNumber)}
-                  {renderFieldRow('Software Version', identificationProfile.softwareVersion)}
-                  {renderFieldRow('Calibration ID', identificationProfile.calibrationId)}
-                  {renderFieldRow('ECU Family / Series', identificationProfile.ecuFamily)}
-                  {renderFieldRow('Manufacturer', identificationProfile.manufacturer)}
-                </div>
               </div>
 
-              <div className="bg-can-panel border border-can-border rounded-lg p-4 space-y-4">
-                <div className="border-b border-can-border pb-3">
-                  <h2 className="text-sm font-bold text-white">Internal Architecture & Network Profile</h2>
-                  <p className="text-[11px] font-mono text-slate-400">
-                    Microcontroller architecture and memory characteristics.
-                  </p>
-                </div>
+              {/* Extended Architecture & Silicon Specs */}
+              {identificationProfile.extendedParameters && Object.keys(identificationProfile.extendedParameters).length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <div className="bg-can-panel border border-can-border rounded-lg p-4 space-y-3">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Cpu className="w-4 h-4 text-sky-400" />
+                      <span>Microprocessor &amp; Silicon Specifications</span>
+                    </h3>
+                    <div className="space-y-1.5 text-xs font-mono">
+                      {identificationProfile.extendedParameters['MicroprocessorFamily'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Architecture:</span>
+                          <span className="text-slate-200 font-semibold">{identificationProfile.extendedParameters['MicroprocessorFamily']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['InstructionSet'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Instruction Set:</span>
+                          <span className="text-slate-200 font-semibold">{identificationProfile.extendedParameters['InstructionSet']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['CoreClock'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Core Clock:</span>
+                          <span className="text-sky-400 font-semibold">{identificationProfile.extendedParameters['CoreClock']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['ExternalFlash'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">External Flash:</span>
+                          <span className="text-slate-200 font-semibold">{identificationProfile.extendedParameters['ExternalFlash']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['Eeprom'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">EEPROM / NVM:</span>
+                          <span className="text-slate-200 font-semibold">{identificationProfile.extendedParameters['Eeprom']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['ChecksumAlgorithm'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Checksum Validation:</span>
+                          <span className="text-emerald-400 font-semibold">{identificationProfile.extendedParameters['ChecksumAlgorithm']}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
-                <div className="space-y-1">
-                  {renderFieldRow('Microcontroller (MCU)', identificationProfile.mcuArchitecture)}
-                  {renderFieldRow('Memory Characteristics', identificationProfile.memoryCharacteristics)}
-                  {renderFieldRow('Diagnostic Protocol', identificationProfile.diagnosticProtocol)}
-                  {renderFieldRow('CAN Addressing Scheme', identificationProfile.canAddressing)}
-                  {renderFieldRow('CAN Nominal Bitrate', identificationProfile.canBitrate, 'bps')}
+                  <div className="bg-can-panel border border-can-border rounded-lg p-4 space-y-3">
+                    <h3 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                      <Terminal className="w-4 h-4 text-emerald-400" />
+                      <span>Protocols, Addressing &amp; Programming Methods</span>
+                    </h3>
+                    <div className="space-y-1.5 text-xs font-mono">
+                      {identificationProfile.extendedParameters['CanAddressingType'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">CAN Addressing:</span>
+                          <span className="text-slate-200 font-semibold">{identificationProfile.extendedParameters['CanAddressingType']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['KlineProtocol'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">K-Line Protocol:</span>
+                          <span className="text-slate-200 font-semibold">{identificationProfile.extendedParameters['KlineProtocol']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['BootPinDetails'] && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Boot Pin / BSL:</span>
+                          <span className="text-amber-400 font-semibold">{identificationProfile.extendedParameters['BootPinDetails']}</span>
+                        </div>
+                      )}
+                      {identificationProfile.extendedParameters['ProgrammingMethods'] && (
+                        <div className="py-1 border-b border-can-border/30">
+                          <span className="text-slate-400 block mb-1">Supported Programming Methods:</span>
+                          <div className="flex flex-wrap gap-1">
+                            {identificationProfile.extendedParameters['ProgrammingMethods'].split('; ').map((meth, i) => (
+                              <span key={i} className="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-sky-300 border border-slate-700">
+                                {meth}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
-
-                <div className="p-3 bg-can-card rounded border border-can-border flex items-center justify-between text-xs">
-                  <span className="text-slate-300">
-                    Evidence Citations: <strong>{identificationProfile.allEvidence.length}</strong>
-                  </span>
-                  {identificationProfile.allEvidence.length > 0 && (
-                    <button
-                      onClick={() => setActiveEvidenceModal(identificationProfile.allEvidence)}
-                      className="px-2.5 py-1 rounded bg-sky-600/20 text-sky-300 hover:bg-sky-600/30 font-medium"
-                    >
-                      Inspect Evidence Table
-                    </button>
-                  )}
-                </div>
-              </div>
+              )}
             </div>
           )}
         </div>
@@ -1376,10 +1515,219 @@ export const EcuEngineeringPage: React.FC = () => {
                   </div>
                 </div>
 
+                {/* Action button */}
+                <div className="flex items-center justify-between p-3 bg-sky-950/30 border border-sky-500/30 rounded-lg">
+                  <div>
+                    <span className="text-xs font-semibold text-white block">Ready to Work with {selectedCatalogProfile.name}?</span>
+                    <span className="text-[11px] text-slate-400">Load this ECU architecture into the active session to test identification, diagnostics, and safe reads.</span>
+                  </div>
+                  <button
+                    onClick={() => handleLoadCatalogProfileToSession(selectedCatalogProfile)}
+                    className="flex items-center space-x-1.5 px-4 py-2 rounded text-xs font-semibold bg-sky-600 hover:bg-sky-500 text-white shadow transition-colors"
+                  >
+                    <Zap className="w-3.5 h-3.5" />
+                    <span>Load ECU into Active Session</span>
+                  </button>
+                </div>
+
+                {/* Microprocessor & Silicon Architecture */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-can-card border border-can-border rounded-lg p-3 space-y-2">
+                    <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Cpu className="w-3.5 h-3.5" />
+                      <span>Microprocessor &amp; Silicon Specs</span>
+                    </h4>
+                    <div className="space-y-1.5 text-xs font-mono">
+                      <div className="flex justify-between py-1 border-b border-can-border/30">
+                        <span className="text-slate-400">MCU Model:</span>
+                        <span className="text-slate-200 font-bold">{selectedCatalogProfile.mcuModel}</span>
+                      </div>
+                      {selectedCatalogProfile.microprocessorFamily && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Family:</span>
+                          <span className="text-slate-200 font-semibold">{selectedCatalogProfile.microprocessorFamily}</span>
+                        </div>
+                      )}
+                      {selectedCatalogProfile.instructionSet && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Instruction Set:</span>
+                          <span className="text-slate-200">{selectedCatalogProfile.instructionSet}</span>
+                        </div>
+                      )}
+                      {selectedCatalogProfile.coreClockMhz && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Clock Speed:</span>
+                          <span className="text-sky-400 font-bold">{selectedCatalogProfile.coreClockMhz} MHz</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between py-1 border-b border-can-border/30">
+                        <span className="text-slate-400">Flash Memory:</span>
+                        <span className="text-emerald-400 font-bold">{(selectedCatalogProfile.flashSizeBytes / 1024 / 1024).toFixed(1)} MB ({selectedCatalogProfile.flashSizeBytes} B)</span>
+                      </div>
+                      {selectedCatalogProfile.externalFlashChip && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">External Flash:</span>
+                          <span className="text-slate-200">{selectedCatalogProfile.externalFlashChip}</span>
+                        </div>
+                      )}
+                      <div className="flex justify-between py-1 border-b border-can-border/30">
+                        <span className="text-slate-400">EEPROM / NVM:</span>
+                        <span className="text-slate-200">{(selectedCatalogProfile.eepromSizeBytes / 1024).toFixed(1)} KB ({selectedCatalogProfile.eepromChip || 'Emulated'})</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Identification Numbers & Vehicle Applications */}
+                  <div className="bg-can-card border border-can-border rounded-lg p-3 space-y-2">
+                    <h4 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <FileCheck className="w-3.5 h-3.5" />
+                      <span>Production Hardware &amp; Software Numbers</span>
+                    </h4>
+                    <div className="space-y-1.5 text-xs font-mono">
+                      {selectedCatalogProfile.hardwareNumberPatterns && selectedCatalogProfile.hardwareNumberPatterns.length > 0 && (
+                        <div className="py-1 border-b border-can-border/30">
+                          <span className="text-slate-400 block mb-1">Hardware Numbers (HW):</span>
+                          <div className="flex flex-wrap gap-1">
+                            {selectedCatalogProfile.hardwareNumberPatterns.map((hw, i) => (
+                              <span key={i} className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-200 border border-slate-700 text-[10px]">
+                                {hw}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {selectedCatalogProfile.softwareNumberPatterns && selectedCatalogProfile.softwareNumberPatterns.length > 0 && (
+                        <div className="py-1 border-b border-can-border/30">
+                          <span className="text-slate-400 block mb-1">Software Numbers (SW):</span>
+                          <div className="flex flex-wrap gap-1">
+                            {selectedCatalogProfile.softwareNumberPatterns.map((sw, i) => (
+                              <span key={i} className="px-1.5 py-0.5 rounded bg-slate-800 text-sky-300 border border-slate-700 text-[10px]">
+                                {sw}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {selectedCatalogProfile.calIdPattern && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Sample CAL ID:</span>
+                          <span className="text-amber-400 font-bold">{selectedCatalogProfile.calIdPattern}</span>
+                        </div>
+                      )}
+                      {selectedCatalogProfile.cvnPattern && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">Sample CVN:</span>
+                          <span className="text-emerald-400 font-bold">{selectedCatalogProfile.cvnPattern}</span>
+                        </div>
+                      )}
+                      <div className="py-1">
+                        <span className="text-slate-400 block mb-1 font-sans">Vehicle Applications:</span>
+                        <div className="flex flex-wrap gap-1 font-sans">
+                          {selectedCatalogProfile.typicalPlatforms.map((plat, i) => (
+                            <span key={i} className="px-1.5 py-0.5 rounded bg-slate-800/80 text-slate-300 border border-slate-700 text-[11px]">
+                              {plat}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Protocols, Addressing & Bench Pinout */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-can-card border border-can-border rounded-lg p-3 space-y-2">
+                    <h4 className="text-xs font-bold text-sky-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Terminal className="w-3.5 h-3.5" />
+                      <span>Protocols &amp; Diagnostic Addressing</span>
+                    </h4>
+                    <div className="space-y-1.5 text-xs font-mono">
+                      <div className="py-1 border-b border-can-border/30">
+                        <span className="text-slate-400 block mb-1">Supported Protocols:</span>
+                        <div className="flex flex-wrap gap-1">
+                          {(selectedCatalogProfile.supportedProtocols || [selectedCatalogProfile.primaryDiagnosticProtocol]).map((proto, i) => (
+                            <span key={i} className="px-2 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-800 text-[10px]">
+                              {proto}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-can-border/30">
+                        <span className="text-slate-400">CAN Addressing:</span>
+                        <span className="text-slate-200 font-semibold">{selectedCatalogProfile.canAddressingType || '11-bit Standard'}</span>
+                      </div>
+                      <div className="flex justify-between py-1 border-b border-can-border/30">
+                        <span className="text-slate-400">Diagnostic IDs:</span>
+                        <span className="text-sky-400 font-bold">
+                          Req: 0x{selectedCatalogProfile.defaultRequestCanId.toString(16).toUpperCase()} / Resp: 0x{selectedCatalogProfile.defaultResponseCanId.toString(16).toUpperCase()}
+                        </span>
+                      </div>
+                      {selectedCatalogProfile.klineProtocol && (
+                        <div className="flex justify-between py-1 border-b border-can-border/30">
+                          <span className="text-slate-400">K-Line Protocol:</span>
+                          <span className="text-slate-200">{selectedCatalogProfile.klineProtocol}</span>
+                        </div>
+                      )}
+                      {selectedCatalogProfile.securityAccessLevels && Object.keys(selectedCatalogProfile.securityAccessLevels).length > 0 && (
+                        <div className="py-1">
+                          <span className="text-slate-400 block mb-1">Security Access Levels (0x27):</span>
+                          {Object.entries(selectedCatalogProfile.securityAccessLevels).map(([lvl, desc], i) => (
+                            <div key={i} className="text-[11px] text-slate-300 py-0.5">
+                              <span className="text-amber-400 font-bold">{lvl}:</span> {desc}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Bench Pinout & Programming Methods */}
+                  <div className="bg-can-card border border-can-border rounded-lg p-3 space-y-2">
+                    <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center gap-1.5">
+                      <Zap className="w-3.5 h-3.5" />
+                      <span>Bench Pinout &amp; Programming Methods</span>
+                    </h4>
+                    {selectedCatalogProfile.benchPinout && Object.keys(selectedCatalogProfile.benchPinout).length > 0 ? (
+                      <div className="border border-can-border rounded overflow-hidden">
+                        <table className="w-full text-left text-xs font-mono">
+                          <thead className="bg-slate-900/80 text-slate-400 text-[10px] border-b border-can-border">
+                            <tr>
+                              <th className="py-1 px-2">Pin / Pad</th>
+                              <th className="py-1 px-2">Signal &amp; Function</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-can-border/30 text-[11px]">
+                            {Object.entries(selectedCatalogProfile.benchPinout).map(([pin, fn], i) => (
+                              <tr key={i} className="hover:bg-slate-800/30">
+                                <td className="py-1 px-2 text-sky-400 font-bold whitespace-nowrap">{pin}</td>
+                                <td className="py-1 px-2 text-slate-300">{fn}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="text-xs text-slate-500 font-mono">Standard OBD-II Pinout: Pin 6 (CAN-H), Pin 14 (CAN-L), Pin 16 (+12V), Pin 4/5 (GND).</div>
+                    )}
+                    {selectedCatalogProfile.programmingMethods && selectedCatalogProfile.programmingMethods.length > 0 && (
+                      <div className="pt-1">
+                        <span className="text-slate-400 block mb-1 text-xs">Programming / Tuning Methods:</span>
+                        <div className="flex flex-wrap gap-1 font-mono">
+                          {selectedCatalogProfile.programmingMethods.map((m, i) => (
+                            <span key={i} className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700 text-[10px]">
+                              {m}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <div className="space-y-2">
                   <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
                     <FileCode className="w-3.5 h-3.5 text-sky-400" />
-                    <span>Memory Map & Protection Boundaries ({selectedCatalogProfile.memoryRegions.length} Regions)</span>
+                    <span>Memory Map &amp; Protection Boundaries ({selectedCatalogProfile.memoryRegions.length} Regions)</span>
                   </h4>
                   <div className="border border-can-border rounded overflow-hidden">
                     <table className="w-full text-left text-xs font-mono">

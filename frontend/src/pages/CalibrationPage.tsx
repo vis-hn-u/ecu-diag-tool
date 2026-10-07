@@ -134,7 +134,7 @@ export const CalibrationPage: React.FC = () => {
 
           {/* Project & Vehicle Info */}
           <span className="text-xs text-slate-400 font-sans">
-            Target: <span className="text-white font-bold">{project?.vehicleModel || '2.0L Turbo'}</span> ({project?.ecuType || 'Bosch CAN'})
+            Target: <span className="text-white font-bold">{project?.vehicleModel || 'Swift Diesel 1.3 DDiS'}</span> ({project?.ecuType || 'Magneti Marelli MJD'})
           </span>
         </div>
 

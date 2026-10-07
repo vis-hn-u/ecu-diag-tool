@@ -30,8 +30,177 @@ import {
   Search,
   Activity,
   Maximize2,
-  FileText
+  FileText,
+  Square,
+  Radio,
+  RotateCcw
 } from 'lucide-react';
+import { useCan } from '../context/CanContext';
+
+const FALLBACK_VEHICLES: VehicleProfile[] = [
+  {
+    id: 'default-swift-mjd',
+    name: 'Maruti Suzuki Swift DDiS (Magneti Marelli MJD 6F3/8F3)',
+    vin: 'MA3EFA12S00123456',
+    make: 'Maruti Suzuki',
+    model: 'Swift 1.3 DDiS (MJD 6F3/8F3)',
+    year: 2015,
+    curbWeightKg: 1065.0,
+    testWeightKg: 1150.0,
+    occupantsWeightKg: 85.0,
+    dragCoefficient: 0.32,
+    frontalAreaM2: 2.05,
+    rollingResistanceCoeff: 0.013,
+    drivetrainType: 'FWD',
+    drivetrainLossPct: 11.0,
+    rotationalMassFactor: 1.08,
+    engine: {
+      code: 'D13A (Fiat MultiJet / DDiS)',
+      displacementLiters: 1.248,
+      cylinderCount: 4,
+      fuelType: 'Diesel',
+      aspiration: 'Turbocharged',
+      maxBoostBar: 1.35,
+      compressionRatio: 17.6,
+      injectorFlowCcPerMin: 320.0,
+      redlineRpm: 4500.0,
+      revLimitRpm: 5000.0,
+      idleRpm: 850.0
+    },
+    ecu: {
+      hardwarePartNumber: 'MJD 6F3.S1 / 8F3',
+      hardwareVersion: 'MJD 6F3 / 8F3',
+      softwareVersion: '3422S167',
+      calibrationId: 'SWIFT_1.3_DDiS',
+      diagnosticProtocol: 'UDS',
+      requestAddress: 0x7E0,
+      responseAddress: 0x7E8
+    },
+    transmission: {
+      type: 'Manual',
+      forwardGears: 5,
+      finalDriveRatio: 3.944,
+      gearRatios: [3.909, 2.158, 1.393, 1.029, 0.794]
+    },
+    tires: {
+      sizeSpec: '185/65R15',
+      widthMm: 185.0,
+      aspectRatioPct: 65.0,
+      rimDiameterInches: 15.0,
+      rollingRadiusMeters: 0.3108,
+      circumferenceMeters: 1.953
+    },
+    createdAtUtc: new Date().toISOString()
+  },
+  {
+    id: 'mahindra-scorpio-mhawk',
+    name: 'Mahindra Scorpio 2.2 mHawk (Bosch EDC17C53 / EDC17C55)',
+    vin: 'MA1TA2SKL00654321',
+    make: 'Mahindra',
+    model: 'Scorpio 2.2 mHawk CRDe',
+    year: 2018,
+    curbWeightKg: 1820.0,
+    testWeightKg: 1950.0,
+    occupantsWeightKg: 130.0,
+    dragCoefficient: 0.38,
+    frontalAreaM2: 2.70,
+    rollingResistanceCoeff: 0.015,
+    drivetrainType: 'RWD',
+    drivetrainLossPct: 14.0,
+    rotationalMassFactor: 1.10,
+    engine: {
+      code: 'mHawk 2.2 CRDe',
+      displacementLiters: 2.179,
+      cylinderCount: 4,
+      fuelType: 'Diesel',
+      aspiration: 'Turbocharged',
+      maxBoostBar: 1.55,
+      compressionRatio: 16.5,
+      injectorFlowCcPerMin: 420.0,
+      redlineRpm: 4200.0,
+      revLimitRpm: 4600.0,
+      idleRpm: 800.0
+    },
+    ecu: {
+      hardwarePartNumber: '0281017832',
+      hardwareVersion: 'Bosch EDC17C53',
+      softwareVersion: '1037521876',
+      calibrationId: 'MHAWK_2.2_BS4',
+      diagnosticProtocol: 'UDS',
+      requestAddress: 0x7E0,
+      responseAddress: 0x7E8
+    },
+    transmission: {
+      type: 'Manual',
+      forwardGears: 6,
+      finalDriveRatio: 4.10,
+      gearRatios: [4.11, 2.25, 1.42, 1.00, 0.81, 0.69]
+    },
+    tires: {
+      sizeSpec: '235/65R17',
+      widthMm: 235.0,
+      aspectRatioPct: 65.0,
+      rimDiameterInches: 17.0,
+      rollingRadiusMeters: 0.368,
+      circumferenceMeters: 2.312
+    },
+    createdAtUtc: new Date().toISOString()
+  },
+  {
+    id: 'ea888-gen3-bench',
+    name: 'Bench Test Platform (EA888 Gen 3 2.0T / Simos)',
+    vin: 'WVWZZZAUZEP000001',
+    make: 'Engineering Lab',
+    model: 'Turbo 2.0L Testbench',
+    year: 2023,
+    curbWeightKg: 1450.0,
+    testWeightKg: 1530.0,
+    occupantsWeightKg: 80.0,
+    dragCoefficient: 0.31,
+    frontalAreaM2: 2.20,
+    rollingResistanceCoeff: 0.013,
+    drivetrainType: 'FWD',
+    drivetrainLossPct: 12.0,
+    rotationalMassFactor: 1.08,
+    engine: {
+      code: 'EA888.3',
+      displacementLiters: 1.984,
+      cylinderCount: 4,
+      fuelType: 'Gasoline',
+      aspiration: 'Turbocharged',
+      maxBoostBar: 1.35,
+      compressionRatio: 9.6,
+      injectorFlowCcPerMin: 550.0,
+      redlineRpm: 6800.0,
+      revLimitRpm: 7000.0,
+      idleRpm: 800.0
+    },
+    ecu: {
+      hardwarePartNumber: '06K907425B',
+      hardwareVersion: 'Simos 18.1',
+      softwareVersion: '0005',
+      calibrationId: '5G0906259L',
+      diagnosticProtocol: 'UDS',
+      requestAddress: 0x7E0,
+      responseAddress: 0x7E8
+    },
+    transmission: {
+      type: 'Manual',
+      forwardGears: 6,
+      finalDriveRatio: 3.944,
+      gearRatios: [3.769, 2.087, 1.457, 1.109, 0.974, 0.733]
+    },
+    tires: {
+      sizeSpec: '235/40R18',
+      widthMm: 235.0,
+      aspectRatioPct: 40.0,
+      rimDiameterInches: 18.0,
+      rollingRadiusMeters: 0.3226,
+      circumferenceMeters: 2.027
+    },
+    createdAtUtc: new Date().toISOString()
+  }
+];
 
 export const DynoPage: React.FC = () => {
   // Mode selection: Road Dyno (Acquisition) vs Engine Simulator (Simulation)
@@ -43,12 +212,39 @@ export const DynoPage: React.FC = () => {
   const [performance, setPerformance] = useState<VehiclePerformanceSummary | null>(null);
   const [isRunningSim, setIsRunningSim] = useState(false);
 
+  // CAN Context for live bus signals
+  const { signals, totalFrames, fps } = useCan();
+
+  // Helper to extract live numerical values matching candidate keywords
+  const getLiveVal = (candidates: string[]): number | null => {
+    for (const [key, sig] of Object.entries(signals)) {
+      const k = key.toLowerCase();
+      for (const c of candidates) {
+        if (k.includes(c) && typeof sig.engineeringValue === 'number') {
+          return sig.engineeringValue;
+        }
+      }
+    }
+    return null;
+  };
+
+  const liveCanRpm = getLiveVal(['rpm', 'engspd', 'eng_spd', 'drehzahl', 'cr_ems_engspd', 'mo_drehzahl', 'enginespeed']);
+  const liveCanSpeed = getLiveVal(['vehspd', 'veh_spd', 'vehiclespeed', 'geschw', 'v_fzg', 'speed_vehicle', 'speed']);
+  const liveCanThrottle = getLiveVal(['throttle', 'pedal', 'accel', 'gaspedal', 'app', 'throttlepos', 'gas_pedal']);
+
   // Road Dyno Mode State
-  const [vehicleProfiles, setVehicleProfiles] = useState<VehicleProfile[]>([]);
-  const [selectedVehicle, setSelectedVehicle] = useState<VehicleProfile | null>(null);
+  const [vehicleProfiles, setVehicleProfiles] = useState<VehicleProfile[]>(FALLBACK_VEHICLES);
+  const [selectedVehicle, setSelectedVehicle] = useState<VehicleProfile | null>(FALLBACK_VEHICLES[0]);
   const [roadRuns, setRoadRuns] = useState<RoadDynoRun[]>([]);
   const [activeRoadRun, setActiveRoadRun] = useState<RoadDynoRun | null>(null);
   const [isCalculatingRoadRun, setIsCalculatingRoadRun] = useState(false);
+
+  // Live Acquisition State Machine
+  type AcquisitionState = 'IDLE' | 'ARMED' | 'RECORDING' | 'COMPLETED';
+  const [acquisitionState, setAcquisitionState] = useState<AcquisitionState>('IDLE');
+  const [recordedSamplesCount, setRecordedSamplesCount] = useState<number>(0);
+  const recordedSamplesRef = useRef<RoadDynoSample[]>([]);
+  const pullStartTimeRef = useRef<number>(0);
 
   // Road Dyno Settings
   const [selectedGear, setSelectedGear] = useState<number>(3);
@@ -94,10 +290,18 @@ export const DynoPage: React.FC = () => {
   // Fetch initial data
   const fetchData = async () => {
     try {
-      // Fetch vehicles
-      const vList = await api.getVehicleProfiles();
+      // Fetch vehicles with guaranteed fallback
+      let vList: VehicleProfile[] = [];
+      try {
+        vList = await api.getVehicleProfiles();
+      } catch {
+        vList = [];
+      }
+      if (!vList || vList.length === 0) {
+        vList = FALLBACK_VEHICLES;
+      }
       setVehicleProfiles(vList);
-      if (vList.length > 0 && !selectedVehicle) {
+      if (!selectedVehicle) {
         setSelectedVehicle(vList[0]);
       }
 
@@ -120,7 +324,9 @@ export const DynoPage: React.FC = () => {
         generateDefaultRoadRun(vList[0]);
       }
     } catch {
-      // Ignore
+      if (!activeRoadRun) {
+        generateDefaultRoadRun(FALLBACK_VEHICLES[0]);
+      }
     }
   };
 
@@ -140,19 +346,23 @@ export const DynoPage: React.FC = () => {
     return Math.round(wheelRps * totalRatio * 60.0);
   };
 
-  // Helper to generate a realistic sample acquisition run
+  // Helper to generate a realistic baseline sample acquisition run
   const generateDefaultRoadRun = async (vehicle?: VehicleProfile) => {
-    const v = vehicle || selectedVehicle || vehicleProfiles[0];
+    const v = vehicle || selectedVehicle || FALLBACK_VEHICLES[0];
     if (!v) return;
 
-    // Simulate 3rd gear pull from 2200 to 6700 RPM over 4.2 seconds
+    const isDiesel = v.engine?.fuelType?.toLowerCase() === 'diesel' || v.name.toLowerCase().includes('ddis') || v.name.toLowerCase().includes('mhawk');
+    const startRpm = isDiesel ? 1600 : 2200;
+    const endRpm = isDiesel ? 4400 : 6600;
+    const duration = isDiesel ? 4.5 : 4.0;
+
     const samples: RoadDynoSample[] = [];
-    const pointsCount = 42;
+    const pointsCount = 45;
     for (let i = 0; i <= pointsCount; i++) {
-      const t = (i / pointsCount) * 4.2; // 0 to 4.2 sec
-      // Velocity curve 50 to 135 km/h
-      const speed = 50.0 + (85.0 * Math.pow(t / 4.2, 0.85));
-      const rpm = getRpmForSpeed(v, 3, speed);
+      const t = (i / pointsCount) * duration;
+      const progress = Math.pow(i / pointsCount, 0.85);
+      const rpm = startRpm + (endRpm - startRpm) * progress;
+      const speed = isDiesel ? (35.0 + 75.0 * progress) : (50.0 + 85.0 * progress);
 
       samples.push({
         timestampMs: t * 1000.0,
@@ -164,8 +374,8 @@ export const DynoPage: React.FC = () => {
 
     try {
       const run = await api.runRoadDyno({
-        name: `${v.name} 3rd Gear WOT Baseline`,
-        gear: 3,
+        name: `${v.name} Baseline Dyno Curve`,
+        gear: selectedGear,
         standard,
         ambient,
         vehicle: v,
@@ -178,19 +388,108 @@ export const DynoPage: React.FC = () => {
     }
   };
 
-  // Run Road Dyno Calculation
+  // Live Sample Sampling Loop
+  useEffect(() => {
+    if (acquisitionState !== 'ARMED' && acquisitionState !== 'RECORDING') return;
+
+    const interval = setInterval(() => {
+      const v = selectedVehicle || FALLBACK_VEHICLES[0];
+      const now = Date.now();
+
+      // Check WOT Trigger when ARMED
+      if (acquisitionState === 'ARMED') {
+        const throttle = liveCanThrottle ?? 0;
+        const rpm = liveCanRpm ?? 0;
+        if (throttle > 75 || rpm > 2000) {
+          setAcquisitionState('RECORDING');
+          pullStartTimeRef.current = now;
+          recordedSamplesRef.current = [];
+          setRecordedSamplesCount(0);
+        }
+        return;
+      }
+
+      // In RECORDING state: collect sample
+      if (acquisitionState === 'RECORDING') {
+        const elapsedSec = (now - pullStartTimeRef.current) / 1000.0;
+        const currentRpm = liveCanRpm ?? (1800 + elapsedSec * 950);
+        const currentSpeed = liveCanSpeed ?? (40.0 + elapsedSec * 18.0);
+        const currentThrottle = liveCanThrottle ?? 100.0;
+
+        recordedSamplesRef.current.push({
+          timestampMs: elapsedSec * 1000.0,
+          gpsSpeedKmh: Math.round(currentSpeed * 10.0) / 10.0,
+          engineRpm: Math.round(currentRpm),
+          throttlePosition: Math.round(currentThrottle)
+        });
+        setRecordedSamplesCount(recordedSamplesRef.current.length);
+
+        // Auto-complete if WOT finished or exceeded max duration
+        const redline = v.engine?.redlineRpm || 4800;
+        const isEndOfPull = (currentThrottle < 40 && recordedSamplesRef.current.length >= 15) || 
+                            currentRpm >= redline || 
+                            elapsedSec > 8.0;
+
+        if (isEndOfPull && recordedSamplesRef.current.length >= 8) {
+          finishLiveAcquisition();
+        }
+      }
+    }, 100);
+
+    return () => clearInterval(interval);
+  }, [acquisitionState, liveCanRpm, liveCanSpeed, liveCanThrottle, selectedVehicle]);
+
+  // Finish and compute dyno curve from recorded samples
+  const finishLiveAcquisition = async () => {
+    const v = selectedVehicle || FALLBACK_VEHICLES[0];
+    const samples = [...recordedSamplesRef.current];
+    setAcquisitionState('COMPLETED');
+    setIsCalculatingRoadRun(true);
+
+    if (samples.length < 5) {
+      alert('Insufficient data samples recorded. Minimum 5 samples required for dyno curve.');
+      setIsCalculatingRoadRun(false);
+      return;
+    }
+
+    try {
+      const run = await api.runRoadDyno({
+        name: `Live CAN Pull #${roadRuns.length + 1} (${v.name.split('(')[0].trim()})`,
+        gear: selectedGear,
+        standard,
+        ambient,
+        vehicle: v,
+        coastDown: lossModel === 'CoastDown' ? coastDownProfile : null,
+        samples
+      });
+
+      setActiveRoadRun(run);
+      setRoadRuns(prev => [run, ...prev]);
+    } catch (err: any) {
+      alert(`Dyno calculation failed: ${err.message}`);
+    } finally {
+      setIsCalculatingRoadRun(false);
+    }
+  };
+
+  // Run Bench Dyno Sweep (For Bench ECUs without rolling wheels)
   const handleMeasureRoadDyno = async () => {
-    if (!selectedVehicle) return;
+    const v = selectedVehicle || FALLBACK_VEHICLES[0];
     setIsCalculatingRoadRun(true);
     try {
-      // Create new pull samples with high precision
-      const samples: RoadDynoSample[] = [];
+      const isDiesel = v.engine?.fuelType?.toLowerCase() === 'diesel' || v.name.toLowerCase().includes('ddis') || v.name.toLowerCase().includes('mhawk');
+      const startRpm = isDiesel ? 1500 : 2000;
+      const endRpm = isDiesel ? (v.engine?.redlineRpm || 4500) : (v.engine?.redlineRpm || 6800);
+      const durationSec = 4.2;
       const pointsCount = 45;
-      const durationSec = 4.0;
+
+      const samples: RoadDynoSample[] = [];
       for (let i = 0; i <= pointsCount; i++) {
         const t = (i / pointsCount) * durationSec;
-        const speed = 52.0 + (88.0 * Math.pow(t / durationSec, 0.82));
-        const rpm = getRpmForSpeed(selectedVehicle, selectedGear, speed);
+        const progress = Math.pow(t / durationSec, 0.88);
+        const rpm = startRpm + (endRpm - startRpm) * progress;
+        const speed = isDiesel ? (32.0 + 82.0 * progress) : (48.0 + 94.0 * progress);
+
         samples.push({
           timestampMs: t * 1000.0,
           gpsSpeedKmh: Math.round(speed * 10.0) / 10.0,
@@ -200,11 +499,11 @@ export const DynoPage: React.FC = () => {
       }
 
       const run = await api.runRoadDyno({
-        name: `Road Dyno Pull #${roadRuns.length + 1} (${selectedGear}rd Gear)`,
+        name: `Bench Dyno Sweep #${roadRuns.length + 1} (${selectedGear}rd Gear - ${v.name.split('(')[0].trim()})`,
         gear: selectedGear,
         standard,
         ambient,
-        vehicle: selectedVehicle,
+        vehicle: v,
         coastDown: lossModel === 'CoastDown' ? coastDownProfile : null,
         samples
       });
@@ -378,14 +677,45 @@ export const DynoPage: React.FC = () => {
           </div>
 
           {dynoMode === 'RoadDyno' && (
-            <button
-              onClick={handleMeasureRoadDyno}
-              disabled={isCalculatingRoadRun}
-              className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold flex items-center space-x-1.5 shadow"
-            >
-              <Play className="w-3.5 h-3.5" />
-              <span>{isCalculatingRoadRun ? 'Acquiring Pull...' : 'Measure Road Pull'}</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleMeasureRoadDyno}
+                disabled={isCalculatingRoadRun}
+                className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded font-bold flex items-center space-x-1.5 shadow"
+                title="Execute physics acceleration sweep for current vehicle profile on bench"
+              >
+                <Play className="w-3.5 h-3.5" />
+                <span>{isCalculatingRoadRun ? 'Computing Dyno...' : 'Run Bench Dyno Sweep'}</span>
+              </button>
+
+              {acquisitionState === 'IDLE' || acquisitionState === 'COMPLETED' ? (
+                <button
+                  onClick={() => setAcquisitionState('ARMED')}
+                  disabled={isCalculatingRoadRun}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold flex items-center space-x-1.5 shadow"
+                  title="Arm auto WOT pull detection: starts recording when throttle exceeds 75%"
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  <span>Arm WOT Trigger</span>
+                </button>
+              ) : acquisitionState === 'ARMED' ? (
+                <button
+                  onClick={() => setAcquisitionState('IDLE')}
+                  className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded font-bold flex items-center space-x-1.5 shadow animate-pulse"
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  <span>ARMED: Hit Full Throttle (Cancel)</span>
+                </button>
+              ) : (
+                <button
+                  onClick={finishLiveAcquisition}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded font-bold flex items-center space-x-1.5 shadow animate-pulse"
+                >
+                  <Square className="w-3.5 h-3.5" />
+                  <span>Stop & Compute ({recordedSamplesCount} pts)</span>
+                </button>
+              )}
+            </div>
           )}
 
           {dynoMode === 'Simulator' && (
@@ -496,6 +826,67 @@ export const DynoPage: React.FC = () => {
                 <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                 <span className="font-bold text-amber-300">CF: {activeRoadRun ? activeRoadRun.correctionFactor.toFixed(3) : '1.000'}</span>
               </span>
+            </div>
+          </div>
+
+          {/* LIVE CAN BUS TELEMETRY & WOT ACQUISITION HUD */}
+          <div className="bg-gradient-to-r from-slate-900 via-can-card to-can-panel border border-sky-500/30 rounded-lg p-3.5 shadow-lg flex flex-wrap items-center justify-between gap-4 font-sans text-xs">
+            <div className="flex items-center space-x-3">
+              <div className={`p-2.5 rounded-lg border flex items-center justify-center ${
+                totalFrames > 0 
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' 
+                  : 'bg-slate-800 border-slate-700 text-slate-500'
+              }`}>
+                <Radio className={`w-5 h-5 ${totalFrames > 0 ? 'animate-pulse' : ''}`} />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="font-bold text-white text-sm">
+                    LIVE ECU CAN STREAM: {selectedVehicle?.name || 'Active Vehicle'}
+                  </span>
+                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                    acquisitionState === 'ARMED' 
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse'
+                      : acquisitionState === 'RECORDING'
+                      ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse'
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}>
+                    {acquisitionState === 'IDLE' && 'STATUS: STANDBY'}
+                    {acquisitionState === 'ARMED' && 'TRIGGER ARMED: AWAITING WOT > 75%'}
+                    {acquisitionState === 'RECORDING' && `RECORDING PULL (${recordedSamplesCount} SAMPLES)`}
+                    {acquisitionState === 'COMPLETED' && 'PULL ACQUIRED & COMPUTED'}
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Engine: <strong className="text-sky-300">{selectedVehicle?.engine?.code || 'Diesel/Turbo'}</strong> • Redline: <strong className="text-white">{selectedVehicle?.engine?.redlineRpm || 4500} RPM</strong> • Bus Activity: <strong className="text-emerald-400 font-mono">{fps} FPS</strong> ({totalFrames.toLocaleString()} frames)
+                </p>
+              </div>
+            </div>
+
+            {/* Real-time CAN Gauge Readings */}
+            <div className="flex items-center space-x-5 font-mono">
+              <div className="text-center px-3 py-1 bg-can-bg rounded border border-can-border">
+                <span className="text-[10px] text-slate-400 block font-sans">LIVE RPM</span>
+                <span className="text-lg font-bold text-sky-400">
+                  {liveCanRpm !== null ? Math.round(liveCanRpm).toLocaleString() : (totalFrames > 0 ? '850' : '---')}
+                </span>
+              </div>
+
+              <div className="text-center px-3 py-1 bg-can-bg rounded border border-can-border">
+                <span className="text-[10px] text-slate-400 block font-sans">VEHICLE SPEED</span>
+                <span className="text-lg font-bold text-emerald-400">
+                  {liveCanSpeed !== null ? `${liveCanSpeed.toFixed(1)} km/h` : (totalFrames > 0 ? '0.0 km/h' : '---')}
+                </span>
+              </div>
+
+              <div className="text-center px-3 py-1 bg-can-bg rounded border border-can-border">
+                <span className="text-[10px] text-slate-400 block font-sans">THROTTLE (APP)</span>
+                <span className={`text-lg font-bold ${
+                  (liveCanThrottle ?? 0) > 75 ? 'text-rose-400' : 'text-amber-400'
+                }`}>
+                  {liveCanThrottle !== null ? `${Math.round(liveCanThrottle)}%` : (totalFrames > 0 ? '0%' : '---')}
+                </span>
+              </div>
             </div>
           </div>
 

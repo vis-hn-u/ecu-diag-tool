@@ -23,7 +23,20 @@ public static class DtcDecoder
         { "B1325", "Device Power 1 Circuit Voltage Low" },
         { "U0100", "Lost Communication With ECM/PCM" },
         { "U0121", "Lost Communication With Anti-Lock Brake System (ABS)" },
-        { "U0140", "Lost Communication With Body Control Module (BCM)" }
+        { "U0140", "Lost Communication With Body Control Module (BCM)" },
+
+        // Maruti Suzuki Swift Diesel (Magneti Marelli MJD) Reference Scanner DTCs
+        { "P0235", "BOOST PRESSURE SENSOR CRT (Boost Pressure Sensor Circuit Malfunction)" },
+        { "P0180", "FUEL TEMP SEN CRT (Fuel Temperature Sensor A Circuit Malfunction)" },
+        { "P0030", "H02S Heater Control Circuit (Bank 1 Sensor 1)" },
+        { "P0110", "IAT SENSOR CIRCUIT (Intake Air Temperature Sensor Circuit)" },
+        { "P0380", "GLOW PLUG CIRCUIT (Glow Plug / Heater Circuit A)" },
+        { "P0571", "BRAKE LIGHT SWITCH CIRCUIT (Brake Switch Circuit Malfunction)" },
+        { "P1120", "ACCEL PEDAL POS SEN 1 CRT (Accelerator Pedal Position Sensor 1 Circuit)" },
+        { "P1481", "RAD FAN OUTPUT 1 CRT MALF (Radiator Fan Relay 1 Control Circuit)" },
+        { "P1190", "FUEL PRESS REGLTR FLOW (Fuel Pressure Regulator Flow Malfunction)" },
+        { "P1530", "A/C COMPRESSOR RELAY CIRCUIT (Air Conditioning Compressor Relay Circuit)" },
+        { "P0190", "FUEL RAIL PRESS SENS CRT (Fuel Rail Pressure Sensor Circuit)" }
     };
 
     public static List<DiagnosticTroubleCode> ParseUds0x19Response(byte[] payload, string ecuName = "ECU", uint canId = 0x7E8)

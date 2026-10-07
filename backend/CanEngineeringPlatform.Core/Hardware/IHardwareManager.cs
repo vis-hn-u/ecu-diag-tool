@@ -15,6 +15,10 @@ public interface IHardwareManager : IDisposable
     HardwareStatus? GetStatus();
     Task<bool> SetActiveTransportAsync(string transportId, CancellationToken cancellationToken = default);
     Task<bool> SendFrameAsync(CanFrame frame, CancellationToken cancellationToken = default);
+    Task<bool> ConnectTransportAsync(string transportId, CancellationToken cancellationToken = default);
+    Task<bool> DisconnectTransportAsync(string transportId, CancellationToken cancellationToken = default);
+    Task<bool> EnableDualHardwareStreamingAsync(string gvretPort = "COM8", string espPort = "COM14", CancellationToken cancellationToken = default);
+    IReadOnlyList<ICanTransport> GetConnectedTransports();
 
     event Action<ICanTransport?>? OnActiveTransportChanged;
     event Action<CanFrame>? OnFrameReceived;

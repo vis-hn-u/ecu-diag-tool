@@ -149,9 +149,48 @@ public class VehicleProfileService : IVehicleProfileService
 
     public VehicleProfileService()
     {
-        var defaultProfile = new VehicleProfile
+        var swiftDefault = new VehicleProfile
         {
             Id = "default-vehicle-profile",
+            Name = "Maruti Suzuki Swift DDiS (Magneti Marelli MJD)",
+            Vin = "MA3EFA12S00123456",
+            Make = "Maruti Suzuki",
+            Model = "Swift 1.3 DDiS (MJD 6F3/8F3)",
+            Year = 2015,
+            CurbWeightKg = 1065.0,
+            TestWeightKg = 1150.0,
+            DragCoefficient = 0.32,
+            FrontalAreaM2 = 2.05,
+            DrivetrainType = "FWD",
+            DrivetrainLossPct = 11.0,
+            Engine = new()
+            {
+                Code = "D13A (Fiat MultiJet)",
+                DisplacementLiters = 1.248,
+                CylinderCount = 4,
+                FuelType = "Diesel",
+                Aspiration = "Turbocharged",
+                MaxBoostBar = 1.35,
+                CompressionRatio = 17.6,
+                RedlineRpm = 4500.0,
+                RevLimitRpm = 5000.0,
+                IdleRpm = 850.0
+            },
+            Ecu = new()
+            {
+                HardwarePartNumber = "MJD 6F3.S1 / 8F3",
+                HardwareVersion = "Marelli MJD",
+                SoftwareVersion = "3422S167",
+                CalibrationId = "SWIFT_1.3_DDiS",
+                DiagnosticProtocol = "UDS",
+                RequestAddress = 0x7E0,
+                ResponseAddress = 0x7E8
+            }
+        };
+
+        var ea888Profile = new VehicleProfile
+        {
+            Id = "ea888-gen3-bench",
             Name = "Bench Test Profile (EA888 Gen 3 2.0T)",
             Vin = "1FA6P8CF5H5123456",
             Make = "Engineering Lab",
@@ -161,8 +200,9 @@ public class VehicleProfileService : IVehicleProfileService
             TestWeightKg = 1530.0
         };
 
-        _profiles[defaultProfile.Id] = defaultProfile;
-        _activeProfileId = defaultProfile.Id;
+        _profiles[swiftDefault.Id] = swiftDefault;
+        _profiles[ea888Profile.Id] = ea888Profile;
+        _activeProfileId = swiftDefault.Id;
     }
 
     public IReadOnlyList<VehicleProfile> GetAllProfiles() => _profiles.Values.ToList();

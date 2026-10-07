@@ -25,6 +25,7 @@ public interface IDiagnosticSessionService
     EcuIdentification? GetEcuInfo(string ecuName);
     IReadOnlyList<ObdPidValue> GetLatestObdValues();
     Task<DiagnosticExchange> SendRequestAsync(uint requestCanId, byte[] payload, string ecuName = "ECM", bool isSimulation = true);
+    Task ScanAllDtcsAsync(bool isSimulation = true);
     Task ClearDtcsAsync(uint requestCanId, string ecuName = "ECM", bool isSimulation = true);
     void ClearHistory();
     event Action<DiagnosticExchange>? OnExchangeUpdated;
@@ -300,9 +301,42 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
 
     public async Task ClearDtcsAsync(uint requestCanId, string ecuName = "ECM", bool isSimulation = true)
     {
-        // UDS 0x14 0xFF 0xFF 0xFF (Clear all emission and non-emission DTC groups)
-        byte[] clearPayload = new byte[] { 0x14, 0xFF, 0xFF, 0xFF };
-        await SendRequestAsync(requestCanId, clearPayload, ecuName, isSimulation);
+        // 1. Send UDS 0x14 0xFF 0xFF 0xFF (Clear all emission and non-emission DTC groups)
+        byte[] udsClearPayload = new byte[] { 0x14, 0xFF, 0xFF, 0xFF };
+        await SendRequestAsync(requestCanId, udsClearPayload, ecuName, isSimulation);
+
+        // 2. Also send OBD-II Mode 04 (Clear DTCs & Freeze Frames)
+        byte[] obdClearPayload = new byte[] { 0x04 };
+        await SendRequestAsync(requestCanId == 0x7E0 ? 0x7DF : requestCanId, obdClearPayload, ecuName, isSimulation);
+
+        // 3. Purge from internal active DTCs dictionary for target ECU (or all if broadcast)
+        foreach (var key in _activeDtcs.Keys.ToList())
+        {
+            if (string.Equals(_activeDtcs[key].EcuName, ecuName, StringComparison.OrdinalIgnoreCase) ||
+                ecuName == "Broadcast" || requestCanId == 0x7DF)
+            {
+                _activeDtcs.TryRemove(key, out _);
+            }
+        }
+        OnDtcsUpdated?.Invoke(GetActiveDtcList());
+    }
+
+    public async Task ScanAllDtcsAsync(bool isSimulation = true)
+    {
+        // 1. Scan ECM via UDS 0x19 0x02 0xFF (ReadDTCInformation by status mask)
+        await SendRequestAsync(0x7E0, new byte[] { 0x19, 0x02, 0xFF }, "ECM", isSimulation);
+
+        // 2. Scan OBD-II Mode 03 (Confirmed emission DTCs)
+        await SendRequestAsync(0x7DF, new byte[] { 0x03 }, "ECM", isSimulation);
+
+        // 3. Scan OBD-II Mode 07 (Pending emission DTCs)
+        await SendRequestAsync(0x7DF, new byte[] { 0x07 }, "ECM", isSimulation);
+
+        // 4. Scan ABS via UDS 0x19 0x02 0xFF
+        await SendRequestAsync(0x7E1, new byte[] { 0x19, 0x02, 0xFF }, "ABS", isSimulation);
+
+        // 5. Scan BCM via UDS 0x19 0x02 0xFF
+        await SendRequestAsync(0x7E2, new byte[] { 0x19, 0x02, 0xFF }, "BCM", isSimulation);
     }
 
     public IReadOnlyList<DiagnosticExchange> GetRecentExchanges(int maxCount = 200)

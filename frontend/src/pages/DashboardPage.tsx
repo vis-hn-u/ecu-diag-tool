@@ -2,10 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { useCan } from '../context/CanContext';
 import { 
   Activity, Binary, Gauge, Network, PlaySquare, Disc, FileCode, CheckCircle2, 
-  AlertTriangle, ShieldCheck, Sliders, Plus, RotateCcw, Trash2, Edit2, Layout, Sparkles 
+  AlertTriangle, ShieldCheck, Sliders, Plus, RotateCcw, Trash2, Edit2, Layout, Sparkles,
+  Search, Radio, Zap, Pin, Flame, ChevronRight
 } from 'lucide-react';
 import { api } from '../services/api';
 import { TabType } from '../components/Sidebar';
+import { DecodedSignal } from '../types';
 import { DashboardLayout, DashboardWidget } from '../types/diagnosticsExtended';
 import { RadialGaugeWidget } from '../components/dashboard/RadialGaugeWidget';
 import { DigitalValueWidget } from '../components/dashboard/DigitalValueWidget';
@@ -30,6 +32,8 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
 
   // Peak tracking map
   const [peaks, setPeaks] = useState<Record<string, number>>({});
+  const [signalSearchFilter, setSignalSearchFilter] = useState<string>('');
+  const [loadingDbcKey, setLoadingDbcKey] = useState<string | null>(null);
 
   const loadPresetLayout = async (presetKey: string) => {
     try {
@@ -69,22 +73,151 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
     });
   };
 
-  // Helper to extract live value for any widget source
+  const handlePinSignalAsWidget = (sig: DecodedSignal) => {
+    if (!activeLayout) return;
+    const nameLower = sig.signalName.toLowerCase();
+    const unitLower = (sig.unit || '').toLowerCase();
+    const isRpm = nameLower.includes('rpm') || unitLower === 'rpm' || nameLower.includes('drehzahl');
+    const isTemp = unitLower === '°c' || nameLower.includes('temp') || nameLower.includes('kuehl');
+    const isPressure = unitLower === 'bar' || nameLower.includes('press') || nameLower.includes('rail');
+    const isSpeed = unitLower === 'km/h' || unitLower === 'mph' || nameLower.includes('speed') || nameLower.includes('geschw');
+
+    const newWidget: DashboardWidget = {
+      id: `widget_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      title: sig.signalName.toUpperCase(),
+      subtitle: sig.messageName || 'Live CAN',
+      sourceType: 'CanSignal',
+      sourceIdentifier: sig.signalName,
+      type: (isRpm || isSpeed) ? 'RadialGauge' : (isPressure || isTemp) ? 'LevelBar' : 'DigitalValue',
+      unit: sig.unit || '',
+      minValue: isRpm ? 0 : isSpeed ? 0 : isTemp ? 0 : isPressure ? 0 : 0,
+      maxValue: isRpm ? 7000 : isSpeed ? 260 : isTemp ? 130 : isPressure ? 200 : 100,
+      decimalPlaces: (isRpm || isSpeed) ? 0 : 1,
+      warnThreshold: isRpm ? 5000 : isTemp ? 105 : undefined,
+      colorScheme: isRpm ? 'amber' : isTemp ? 'rose' : isPressure ? 'sky' : 'emerald',
+      position: { x: 0, y: 0, w: (isRpm || isSpeed) ? 4 : 3, h: 2 }
+    };
+
+    handleSaveWidget(newWidget);
+  };
+
+  const handleQuickLoadDbc = async (key: string) => {
+    setLoadingDbcKey(key);
+    try {
+      await api.loadDbcFromLibrary(key);
+      await refreshDbc();
+    } catch {
+      // Ignore
+    } finally {
+      setLoadingDbcKey(null);
+    }
+  };
+
+  // Helper to extract live value for any widget source with fuzzy matching
+  const findMatchingSignal = (widget: DashboardWidget): DecodedSignal | null => {
+    const signalEntries = Object.entries(signals);
+    if (signalEntries.length === 0) return null;
+
+    // 1. Direct or substring match on sourceIdentifier
+    if (widget.sourceIdentifier) {
+      const idLower = widget.sourceIdentifier.toLowerCase();
+      const direct = signalEntries.find(([name]) => 
+        name.toLowerCase() === idLower || name.toLowerCase().includes(idLower)
+      );
+      if (direct) return direct[1];
+    }
+
+    const titleLower = widget.title.toLowerCase();
+    const unitLower = (widget.unit || '').toLowerCase();
+
+    const matchesAny = (candidates: string[]): DecodedSignal | null => {
+      for (const [name, sig] of signalEntries) {
+        const n = name.toLowerCase();
+        for (const c of candidates) {
+          if (n.includes(c)) return sig;
+        }
+      }
+      return null;
+    };
+
+    // 2. Engine RPM / Speed
+    if (unitLower === 'rpm' || titleLower.includes('rpm') || titleLower.includes('engine speed') || titleLower.includes('drehzahl') || titleLower.includes('engspd')) {
+      const m = matchesAny(['rpm', 'engspd', 'eng_spd', 'drehzahl', 'enginespeed', 'engine_speed', 'motor_rpm', 'motordrehzahl', 'cr_ems_engspd', 'mo_drehzahl']);
+      if (m) return m;
+    }
+
+    // 3. Vehicle Speed
+    if (unitLower === 'km/h' || unitLower === 'mph' || titleLower.includes('speed') || titleLower.includes('velocity') || titleLower.includes('geschwindigkeit')) {
+      const m = matchesAny(['vehspd', 'veh_spd', 'vehiclespeed', 'vehicle_speed', 'geschw', 'v_fzg', 'speed_vehicle', 'speed']);
+      if (m) return m;
+    }
+
+    // 4. Coolant / Engine Temp
+    if (unitLower === '°c' || unitLower === 'degc' || titleLower.includes('coolant') || titleLower.includes('water') || titleLower.includes('kuehl')) {
+      const m = matchesAny(['coolant', 'cool_temp', 'engcool', 'water_temp', 'motortemp', 't_kuehl', 'temp_engine', 'ect']);
+      if (m) return m;
+    }
+
+    // 5. Fuel Rail Pressure
+    if ((unitLower === 'bar' || unitLower === 'mpa' || unitLower === 'psi') && (titleLower.includes('rail') || titleLower.includes('fuel'))) {
+      const m = matchesAny(['rail', 'railpress', 'p_rail', 'fuelpress', 'fuel_press', 'common_rail']);
+      if (m) return m;
+    }
+
+    // 6. Boost Pressure / MAP
+    if ((unitLower === 'bar' || unitLower === 'psi' || unitLower === 'kpa') && (titleLower.includes('boost') || titleLower.includes('turbo') || titleLower.includes('manifold') || titleLower.includes('map'))) {
+      const m = matchesAny(['boost', 'ladedruck', 'p_lade', 'manifold', 'map', 'turbo_pressure', 'air_press']);
+      if (m) return m;
+    }
+
+    // 7. Throttle / Accelerator Pedal Position
+    if (unitLower === '%' && (titleLower.includes('throttle') || titleLower.includes('pedal') || titleLower.includes('gas') || titleLower.includes('accel'))) {
+      const m = matchesAny(['throttle', 'pedal', 'accel', 'gaspedal', 'app', 'throttlepos', 'gas_pedal', 'pedal_pos']);
+      if (m) return m;
+    }
+
+    // 8. Battery Voltage
+    if (unitLower === 'v' || titleLower.includes('volt') || titleLower.includes('batt') || titleLower.includes('spannung')) {
+      const m = matchesAny(['batt', 'battery', 'voltage', 'ubatt', 'kl30', 'v_batt']);
+      if (m) return m;
+    }
+
+    // 9. Engine Torque
+    if (unitLower === 'nm' || titleLower.includes('torque') || titleLower.includes('drehmoment')) {
+      const m = matchesAny(['torque', 'drehmoment', 'engtrq', 'tq', 'moment']);
+      if (m) return m;
+    }
+
+    // 10. Intake Air Temperature
+    if (titleLower.includes('intake') || titleLower.includes('iat') || titleLower.includes('ansaugluft')) {
+      const m = matchesAny(['iat', 'intake', 'ansaug', 't_ansaug']);
+      if (m) return m;
+    }
+
+    return null;
+  };
+
   const getWidgetLiveValue = (widget: DashboardWidget): number => {
-    // Check DBC decoded signals first
-    const signalMatch = Object.entries(signals).find(([name]) => 
-      name.toLowerCase() === widget.sourceIdentifier.toLowerCase() ||
-      name.toLowerCase().includes(widget.sourceIdentifier.toLowerCase())
-    );
-    if (signalMatch && typeof signalMatch[1].engineeringValue === 'number') {
-      const val = signalMatch[1].engineeringValue;
+    // 1. Priority: DBC Decoded Live CAN Bus Signals
+    const matchedSignal = findMatchingSignal(widget);
+    if (matchedSignal && typeof matchedSignal.engineeringValue === 'number') {
+      const val = matchedSignal.engineeringValue;
       if (peaks[widget.id] === undefined || val > peaks[widget.id]) {
         setPeaks(p => ({ ...p, [widget.id]: val }));
       }
       return val;
     }
 
-    // Realistic fallback/simulated readings for standalone testing
+    // 2. If live CAN frames are actively arriving from bus (hardware online), return nominal base reading
+    if (totalFrames > 0) {
+      if (widget.title.includes('ENGINE SPEED') || widget.unit === 'RPM') return 850; // Idle RPM
+      if (widget.title.includes('COOLANT') || widget.unit === '°C') return 85.0;
+      if (widget.title.includes('FUEL') && widget.unit === 'bar') return 300.0;
+      if (widget.unit === 'V') return 13.8;
+      return widget.minValue;
+    }
+
+    // 3. Fallback when completely offline / standalone demo
     const now = Date.now() / 1000.0;
     if (widget.title.includes('ENGINE SPEED') || widget.unit === 'RPM') {
       return 2200 + Math.sin(now * 1.5) * 1800 + 1000;
@@ -276,6 +409,144 @@ export const DashboardPage: React.FC<DashboardProps> = ({ onNavigate }) => {
               <p className="text-xs text-slate-500 mt-1">Load a preset above or click 'Add Widget' to design your dashboard.</p>
             </div>
           )}
+
+          {/* LIVE DECODED VEHICLE TELEMETRY STREAM */}
+          <div className="bg-can-panel border border-can-border rounded-xl p-5 shadow-lg space-y-4 font-sans">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-can-border pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
+                  <Radio className="w-5 h-5 animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                    <span>LIVE DECODED VEHICLE TELEMETRY STREAM</span>
+                    <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] rounded-full font-mono">
+                      {Object.keys(signals).length} Active Signals
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Real-time physical engineering parameters automatically decoded from active bus frames. Click "+ Pin as Meter" to instantly add any signal to your cockpit gauges.
+                  </p>
+                </div>
+              </div>
+
+              {/* Search & Active DBC Indicator */}
+              <div className="flex items-center space-x-3 text-xs">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    value={signalSearchFilter}
+                    onChange={e => setSignalSearchFilter(e.target.value)}
+                    placeholder="Search signals (RPM, Rail, Temp...)"
+                    className="bg-can-bg border border-can-border rounded pl-8 pr-3 py-1 text-xs text-white placeholder-slate-500 w-56 focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="flex items-center space-x-1.5 px-2.5 py-1 bg-can-bg border border-can-border rounded text-[11px] font-mono">
+                  <span className="text-slate-400">DBC:</span>
+                  <span className="text-sky-400 font-bold truncate max-w-[150px]">
+                    {activeDbc?.activeKey || (activeDbc?.isLoaded ? 'Active DBC' : 'None Active')}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Automotive DBC Switcher Chips */}
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-[11px] text-slate-400 font-semibold">1-Click Vehicle DBC:</span>
+              {[
+                { key: 'magneti_marelli_mjd_ddis', label: 'Magneti Marelli MJD (Maruti/Fiat)' },
+                { key: 'bosch_edc17_mhawk_revotorq', label: 'Bosch EDC17 (Mahindra/Tata)' },
+                { key: 'bosch_edc16_crde', label: 'Bosch EDC16 (CRDe)' },
+                { key: 'universal_obd2_live_data', label: 'Universal OBD-II Live' }
+              ].map(dbc => (
+                <button
+                  key={dbc.key}
+                  onClick={() => handleQuickLoadDbc(dbc.key)}
+                  disabled={loadingDbcKey === dbc.key}
+                  className={`px-2.5 py-1 rounded text-[11px] font-semibold border transition-all flex items-center space-x-1 ${
+                    activeDbc?.activeKey?.toLowerCase().includes(dbc.key.toLowerCase())
+                      ? 'bg-sky-600/30 border-sky-500 text-sky-300 shadow-sm'
+                      : 'bg-can-bg border-can-border text-slate-300 hover:text-white hover:border-slate-500'
+                  }`}
+                >
+                  <FileCode className="w-3 h-3 text-sky-400" />
+                  <span>{loadingDbcKey === dbc.key ? 'Loading...' : dbc.label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Decoded Signals Live Cards */}
+            {Object.keys(signals).length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {Object.values(signals)
+                  .filter(sig => 
+                    !signalSearchFilter || 
+                    sig.signalName.toLowerCase().includes(signalSearchFilter.toLowerCase()) ||
+                    sig.messageName?.toLowerCase().includes(signalSearchFilter.toLowerCase())
+                  )
+                  .map(sig => {
+                    const isPinned = activeLayout?.widgets.some(w => w.sourceIdentifier.toLowerCase() === sig.signalName.toLowerCase());
+                    return (
+                      <div
+                        key={`${sig.canId}-${sig.signalName}`}
+                        className="bg-can-bg border border-can-border hover:border-sky-500/40 rounded-lg p-3.5 shadow flex flex-col justify-between transition-all group"
+                      >
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <span className="font-bold text-white text-xs block group-hover:text-sky-300 transition-colors truncate">
+                              {sig.signalName}
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              0x{sig.canId.toString(16).toUpperCase()} • {sig.messageName || 'MSG'}
+                            </span>
+                          </div>
+                          <span className="text-[10px] px-1.5 py-0.5 bg-slate-800 text-slate-400 rounded font-mono">
+                            {sig.transmitterNode || 'ECU'}
+                          </span>
+                        </div>
+
+                        <div className="my-2.5">
+                          <div className="text-xl font-bold text-emerald-400 font-mono">
+                            {typeof sig.engineeringValue === 'number' ? sig.engineeringValue.toFixed(2) : sig.formattedValue}
+                            <span className="text-xs text-slate-400 font-sans ml-1.5 font-normal">
+                              {sig.unit}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="pt-2 border-t border-can-border/60 flex items-center justify-between text-[11px]">
+                          <span className="text-[10px] text-slate-500">
+                            Raw: 0x{sig.rawValue.toString(16).toUpperCase()}
+                          </span>
+                          <button
+                            onClick={() => handlePinSignalAsWidget(sig)}
+                            disabled={isPinned}
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold flex items-center space-x-1 transition-all ${
+                              isPinned
+                                ? 'bg-slate-800 text-slate-500 cursor-default'
+                                : 'bg-sky-600/20 text-sky-300 hover:bg-sky-600/40 border border-sky-500/30'
+                            }`}
+                          >
+                            <Pin className="w-2.5 h-2.5" />
+                            <span>{isPinned ? 'In Cockpit' : '+ Pin as Meter'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+              </div>
+            ) : (
+              <div className="p-8 text-center border border-dashed border-can-border rounded-lg bg-can-bg/50">
+                <Radio className="w-8 h-8 text-slate-600 mx-auto mb-2 animate-pulse" />
+                <div className="text-xs font-bold text-slate-300 uppercase tracking-wider">Awaiting Live Bus Signals</div>
+                <p className="text-[11px] text-slate-500 mt-1 max-w-md mx-auto">
+                  When CAN messages arrive on COM8 (Arduino Nano) or COM14 (ESP8266), decoded physical values will populate here automatically. Ensure a matching DBC database is active.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

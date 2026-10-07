@@ -1,4 +1,4 @@
-export type ManufacturerOem = 'Generic' | 'VAG' | 'BMW' | 'Ford' | 'GM' | 'Toyota' | 'Mercedes';
+export type ManufacturerOem = 'Generic' | 'MarutiMarelli' | 'VAG' | 'BMW' | 'Ford' | 'GM' | 'Toyota' | 'Mercedes';
 
 export type LiveDataIdentifierType = 'UdsDid' | 'KwpLocalId' | 'ObdPid' | 'BroadcastCan';
 

@@ -125,6 +125,13 @@ public class DiagnosticsController : ControllerBase
         return Ok(new { success = true, message = $"DTCs cleared for {ecuName}" });
     }
 
+    [HttpPost("scan-all-dtcs")]
+    public async Task<ActionResult<IReadOnlyList<DiagnosticTroubleCode>>> ScanAllDtcs([FromQuery] bool isSimulation = true)
+    {
+        await _diagnosticService.ScanAllDtcsAsync(isSimulation);
+        return Ok(_diagnosticService.GetActiveDtcList());
+    }
+
     [HttpGet("ecu-info")]
     public ActionResult<IReadOnlyList<EcuIdentification>> GetEcuIdentifications()
     {

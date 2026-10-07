@@ -114,8 +114,27 @@ public class ManufacturerLiveDataService : IManufacturerLiveDataService
                 "gm_commanded_lambda" => loadPct > 70 ? 0.85 : 1.00,
                 "toyota_vvti_intake" => 10.0 + (rpm / 250.0),
                 "merc_dpf_diff_press" => 12.5 + (loadPct * 0.15),
+
+                // Maruti Suzuki Swift Diesel (Magneti Marelli MJD)
+                "marelli_ac_temp_vtg" => 0.02, // Matches bench simulator LCD display reading exactly: AC_TEMP_VTG =0.02V
+                "marelli_fuel_rail_press" => 280.0 + (boostBar * 420.0) + (loadPct * 6.5),
+                "marelli_boost_act" => 0.98 + (boostBar * 0.95),
+                "marelli_fuel_temp" => 42.5 + (loadPct * 0.08),
+                "marelli_iat" => 34.0 + (boostBar * 8.5),
+                "marelli_inj_main_qty" => 5.2 + (loadPct * 0.42),
+                "marelli_fan_relay_1" => 0.0,
+                "marelli_fan_relay_2" => 0.0,
+                "marelli_fuel_pump_relay" => 1.0,
+                "marelli_check_engine_light" => 1.0, // Check light ON due to active simulator DTCs
+                "marelli_security_light" => 0.0,
                 _ => (def.MinValue + def.MaxValue) / 2.0
             };
+
+            string? stateLabel = null;
+            if (def.StateLabels != null && def.StateLabels.TryGetValue((int)Math.Round(simVal), out var lbl))
+            {
+                stateLabel = lbl;
+            }
 
             list.Add(new DecodedManufacturerValue
             {
@@ -125,8 +144,9 @@ public class ManufacturerLiveDataService : IManufacturerLiveDataService
                 Category = def.Category,
                 RawValue = simVal,
                 ScaledValue = Math.Round(simVal, 2),
-                FormattedValue = simVal.ToString(def.DecimalFormat),
+                FormattedValue = stateLabel ?? simVal.ToString(def.DecimalFormat),
                 Unit = def.Unit,
+                StateLabel = stateLabel,
                 TimestampUtc = DateTime.UtcNow,
                 IsWarning = (def.MinValue != def.MaxValue) && (simVal < def.MinValue || simVal > def.MaxValue)
             });
@@ -429,6 +449,216 @@ public class ManufacturerLiveDataService : IManufacturerLiveDataService
             Unit = "hPa",
             MinValue = 0.0,
             MaxValue = 350.0
+        });
+
+        // Maruti Suzuki Swift Diesel (Magneti Marelli MJD)
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_ac_temp_vtg",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Climate / Thermal",
+            Name = "A/C Temp Sensor Voltage (AC_TEMP_VTG)",
+            Description = "Air conditioner evaporator temperature sensor analog voltage (P1530 threshold circuit)",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1102,
+            ByteOffset = 0,
+            ByteLength = 2,
+            Factor = 0.001,
+            Offset = 0.0,
+            Unit = "V",
+            DecimalFormat = "F2",
+            MinValue = 0.0,
+            MaxValue = 5.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_fuel_rail_press",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Fuel Injection",
+            Name = "Fuel Rail Pressure (Actual)",
+            Description = "Common rail high-pressure sensor reading (P0190 / P1190 circuit)",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1130,
+            ByteOffset = 0,
+            ByteLength = 2,
+            Factor = 0.1,
+            Offset = 0.0,
+            Unit = "bar",
+            DecimalFormat = "F1",
+            MinValue = 150.0,
+            MaxValue = 1600.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_boost_act",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Air Intake & Turbo",
+            Name = "Manifold Boost Pressure (Actual)",
+            Description = "Intake manifold absolute boost pressure sensor signal (P0235 circuit)",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1124,
+            ByteOffset = 0,
+            ByteLength = 2,
+            Factor = 0.001,
+            Offset = 0.0,
+            Unit = "bar",
+            DecimalFormat = "F2",
+            MinValue = 0.8,
+            MaxValue = 2.6
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_fuel_temp",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Fuel Metering",
+            Name = "Fuel Temperature Sensor (Fuel Temp Sen)",
+            Description = "High-pressure pump fuel inlet temperature (P0180 circuit)",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1142,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = -40.0,
+            Unit = "°C",
+            DecimalFormat = "F1",
+            MinValue = -20.0,
+            MaxValue = 120.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_iat",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Air Intake & Turbo",
+            Name = "Intake Air Temperature (IAT Sensor)",
+            Description = "Manifold air intake charge temperature sensor (P0110 circuit)",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1120,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = -40.0,
+            Unit = "°C",
+            DecimalFormat = "F1",
+            MinValue = -20.0,
+            MaxValue = 100.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_inj_main_qty",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Fuel Injection",
+            Name = "Main Injection Fuel Quantity",
+            Description = "Multijet main injection fuel delivery volume per cylinder stroke",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1160,
+            ByteOffset = 0,
+            ByteLength = 2,
+            Factor = 0.01,
+            Offset = 0.0,
+            Unit = "mm³/stk",
+            DecimalFormat = "F2",
+            MinValue = 0.0,
+            MaxValue = 65.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_fan_relay_1",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Actuators & Relays",
+            Name = "Radiator Fan Relay 1 Control (FAN RELAY-1)",
+            Description = "Cooling radiator fan stage 1 control circuit (P1481 circuit)",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1201,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = 0.0,
+            Unit = "state",
+            StateLabels = new() { [0] = "OFF", [1] = "ON" },
+            MinValue = 0.0,
+            MaxValue = 1.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_fan_relay_2",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Actuators & Relays",
+            Name = "Radiator Fan Relay 2 Control (FAN RELAY-2)",
+            Description = "Cooling radiator fan stage 2 control circuit",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1202,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = 0.0,
+            Unit = "state",
+            StateLabels = new() { [0] = "OFF", [1] = "ON" },
+            MinValue = 0.0,
+            MaxValue = 1.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_fuel_pump_relay",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Actuators & Relays",
+            Name = "Fuel Pump Relay Control (FUEL PUMP-1)",
+            Description = "In-tank diesel supply feed electric lift pump relay command",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1203,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = 0.0,
+            Unit = "state",
+            StateLabels = new() { [0] = "OFF", [1] = "ON" },
+            MinValue = 0.0,
+            MaxValue = 1.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_check_engine_light",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Cluster Indicators",
+            Name = "Check Engine Malfunction Indicator (CHECK LIGHT)",
+            Description = "Instrument cluster check engine malfunction indicator lamp driver",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1210,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = 0.0,
+            Unit = "state",
+            StateLabels = new() { [0] = "OFF", [1] = "ON" },
+            MinValue = 0.0,
+            MaxValue = 1.0
+        });
+
+        _definitions.Add(new ManufacturerLiveDataDefinition
+        {
+            Id = "marelli_security_light",
+            Oem = ManufacturerOem.MarutiMarelli,
+            Category = "Cluster Indicators",
+            Name = "Immobilizer Security Lamp (SECURITY LIGHT)",
+            Description = "Maruti Suzuki key immobilizer anti-theft security indicator status",
+            IdentifierType = LiveDataIdentifierType.UdsDid,
+            Identifier = 0x1211,
+            ByteOffset = 0,
+            ByteLength = 1,
+            Factor = 1.0,
+            Offset = 0.0,
+            Unit = "state",
+            StateLabels = new() { [0] = "OFF", [1] = "ON" },
+            MinValue = 0.0,
+            MaxValue = 1.0
         });
     }
 }

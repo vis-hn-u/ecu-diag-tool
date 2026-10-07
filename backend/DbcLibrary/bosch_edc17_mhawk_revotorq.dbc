@@ -1,0 +1,50 @@
+VERSION "1.0"
+
+BU_: ECM ABS BCM CLUSTER
+
+BO_ 288 Powertrain_0x120: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|6000] "rpm" CLUSTER,ABS
+ SG_ ActualEngineTorque : 16|16@1+ (0.1,-500) [-500|600] "Nm" ABS
+ SG_ DriverTargetTorque : 32|16@1+ (0.1,-500) [-500|600] "Nm" ABS
+ SG_ AcceleratorPedal : 48|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ EngineCrankStatus : 56|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ IdleSpeedGovernorActive : 57|1@1+ (1,0) [0|1] "" CLUSTER
+
+BO_ 784 VehicleDynamics_0x310: 8 ABS
+ SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] "km/h" ECM,CLUSTER
+ SG_ WheelSpeedFL : 16|16@1+ (0.01,0) [0|250] "km/h" CLUSTER
+ SG_ WheelSpeedFR : 32|16@1+ (0.01,0) [0|250] "km/h" CLUSTER
+ SG_ BrakePedalActive : 48|1@1+ (1,0) [0|1] "" ECM
+ SG_ ClutchPedalDepressed : 49|1@1+ (1,0) [0|1] "" ECM
+ SG_ CruiseControlSwitchState : 50|3@1+ (1,0) [0|7] "" ECM
+
+BO_ 788 Thermal_Air_0x314: 8 ECM
+ SG_ CoolantTemperature : 0|8@1+ (1,-40) [-40|150] "degC" CLUSTER
+ SG_ EngineOilTemperature : 8|8@1+ (1,-40) [-40|160] "degC" CLUSTER
+ SG_ FuelTemperature : 16|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ IntakeAirTemperature : 24|8@1+ (1,-40) [-40|120] "degC" CLUSTER
+ SG_ AmbientTemperature : 32|8@1+ (0.5,-40) [-40|85] "degC" CLUSTER
+ SG_ MassAirFlow_MAF : 40|16@1+ (0.1,0) [0|650] "kg/h" CLUSTER
+
+BO_ 792 HighPressure_Fuel_0x318: 8 ECM
+ SG_ RailPressureActual : 0|16@1+ (0.1,0) [0|2200] "bar" CLUSTER
+ SG_ RailPressureSetpoint : 16|16@1+ (0.1,0) [0|2200] "bar" CLUSTER
+ SG_ BoostPressureActual : 32|16@1+ (0.1,0) [0|400] "kPa" CLUSTER
+ SG_ BoostPressureSetpoint : 48|16@1+ (0.1,0) [0|400] "kPa" CLUSTER
+
+BO_ 1160 Emissions_DPF_0x488: 8 ECM
+ SG_ DpfDifferentialPressure : 0|16@1+ (0.1,0) [0|1000] "hPa" CLUSTER
+ SG_ DpfSootMass : 16|8@1+ (0.2,0) [0|50] "g" CLUSTER
+ SG_ ExhaustGasTemp_PreTurbine : 24|16@1+ (0.1,-40) [-40|1000] "degC" CLUSTER
+ SG_ ExhaustGasTemp_PreDpf : 40|16@1+ (0.1,-40) [-40|1000] "degC" CLUSTER
+ SG_ DpfRegenStatus : 56|4@1+ (1,0) [0|15] "" CLUSTER
+ SG_ EgrPositionActual : 60|4@1+ (6.6666,0) [0|100] "%" CLUSTER
+
+BO_ 1416 SystemStatus_0x588: 8 ECM
+ SG_ BatteryVoltage : 0|8@1+ (0.1,0) [0|25] "V" CLUSTER
+ SG_ GlowPlugLight : 8|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ MilLight : 9|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ OilPressureOk : 10|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ ServiceDueWarning : 11|1@1+ (1,0) [0|1] "" CLUSTER
+ SG_ InstantFuelEconomy : 16|16@1+ (0.01,0) [0|100] "km/l" CLUSTER
+ SG_ TotalFuelInjected_mm3 : 32|16@1+ (0.05,0) [0|200] "mm3" CLUSTER

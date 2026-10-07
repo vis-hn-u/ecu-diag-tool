@@ -162,6 +162,32 @@ public class EcuIdentificationService : IEcuIdentificationService
             {
                 profile.VehiclePlatform = FieldWithConfidence<string>.Inferred(string.Join(", ", matchedFamily.TypicalPlatforms), dbEv);
             }
+            if (profile.HardwareNumber.Confidence == IdentificationConfidence.Unknown && matchedFamily.HardwareNumberPatterns.Count > 0)
+            {
+                profile.HardwareNumber = FieldWithConfidence<string>.Inferred(matchedFamily.HardwareNumberPatterns[0], dbEv);
+            }
+            if (profile.SoftwareNumber.Confidence == IdentificationConfidence.Unknown && matchedFamily.SoftwareNumberPatterns.Count > 0)
+            {
+                profile.SoftwareNumber = FieldWithConfidence<string>.Inferred(matchedFamily.SoftwareNumberPatterns[0], dbEv);
+            }
+            if (profile.CalibrationId.Confidence == IdentificationConfidence.Unknown && !string.IsNullOrEmpty(matchedFamily.CalIdPattern))
+            {
+                profile.CalibrationId = FieldWithConfidence<string>.Inferred(matchedFamily.CalIdPattern, dbEv);
+            }
+            if (matchedFamily.SupportedProtocols.Count > 0)
+            {
+                profile.SupportedServices = new List<string>(matchedFamily.SupportedProtocols);
+            }
+            profile.ExtendedParameters["MicroprocessorFamily"] = matchedFamily.MicroprocessorFamily;
+            profile.ExtendedParameters["InstructionSet"] = matchedFamily.InstructionSet;
+            profile.ExtendedParameters["CoreClock"] = $"{matchedFamily.CoreClockMhz} MHz";
+            profile.ExtendedParameters["ExternalFlash"] = matchedFamily.ExternalFlashChip;
+            profile.ExtendedParameters["Eeprom"] = matchedFamily.EepromChip;
+            profile.ExtendedParameters["ChecksumAlgorithm"] = matchedFamily.ChecksumAlgorithm;
+            profile.ExtendedParameters["CanAddressingType"] = matchedFamily.CanAddressingType;
+            profile.ExtendedParameters["KlineProtocol"] = matchedFamily.KlineProtocol;
+            profile.ExtendedParameters["BootPinDetails"] = matchedFamily.BootPinDetails;
+            profile.ExtendedParameters["ProgrammingMethods"] = string.Join("; ", matchedFamily.ProgrammingMethods);
             profile.AllEvidence.Add(dbEv);
         }
         else

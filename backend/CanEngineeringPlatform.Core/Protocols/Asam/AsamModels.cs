@@ -53,8 +53,8 @@ public class OdxDiagServiceDescriptor
 
 public class OdxEcuVariant
 {
-    public string EcuVariantId { get; set; } = "EV_ECM_BOSCH_MED17";
-    public string VariantName { get; set; } = "Bosch MED17.5.5 Gen3";
+    public string EcuVariantId { get; set; } = "EV_ECM_MARELLI_MJD";
+    public string VariantName { get; set; } = "Magneti Marelli MJD (Swift DDiS)";
     public List<OdxDiagServiceDescriptor> Services { get; set; } = new();
 }
 

@@ -316,4 +316,57 @@ public class DiagnosticsExtendedTests
         Assert.True(deleted);
         Assert.Null(service.GetLayoutById("custom_tuner_1"));
     }
+
+    [Fact]
+    public void MagnetiMarelli_EcuCompatibilityAndDtcMapping_ValidatesBenchSetup()
+    {
+        // 1. Verify EcuCompatibilityManager matches Swift Diesel Marelli MJD
+        var compatMgr = new CanEngineeringPlatform.Core.EcuEngineering.Compatibility.EcuCompatibilityManager();
+        var profile = compatMgr.MatchProfile("MJD 6F3.S1", "3422S167", "Magneti Marelli");
+        Assert.NotNull(profile);
+        Assert.Equal("MAGNETI_MARELLI_MJD", profile.FamilyId);
+        Assert.Equal("Magneti Marelli", profile.Manufacturer);
+        Assert.Equal(500000u, profile.DefaultBaudRate);
+        Assert.Equal((uint)0x7E0, profile.DefaultRequestCanId);
+        Assert.Equal((uint)0x7E8, profile.DefaultResponseCanId);
+
+        // 2. Verify Reference Maruti scanner DTCs decode properly
+        // Example: P0235, P0180, P1530, P1481
+        var p0235Desc = CanEngineeringPlatform.Core.Diagnostics.Dtc.DtcDecoder.GetDescription("P0235");
+        Assert.Contains("BOOST PRESSURE", p0235Desc);
+
+        var p1530Desc = CanEngineeringPlatform.Core.Diagnostics.Dtc.DtcDecoder.GetDescription("P1530");
+        Assert.Contains("A/C COMPRESSOR RELAY", p1530Desc);
+
+        var p0190Desc = CanEngineeringPlatform.Core.Diagnostics.Dtc.DtcDecoder.GetDescription("P0190");
+        Assert.Contains("FUEL RAIL PRESS", p0190Desc);
+    }
+
+    [Fact]
+    public void MagnetiMarelli_LiveDataAndMappack_ProvidesFullDefinitions()
+    {
+        // 1. Verify Live Data Definitions for MarutiMarelli
+        var liveDataService = new ManufacturerLiveDataService();
+        var marelliDefs = liveDataService.GetDefinitionsByOem(ManufacturerOem.MarutiMarelli);
+        Assert.NotEmpty(marelliDefs);
+        Assert.Contains(marelliDefs, d => d.Id == "marelli_ac_temp_vtg");
+        Assert.Contains(marelliDefs, d => d.Id == "marelli_fuel_rail_press");
+        Assert.Contains(marelliDefs, d => d.Id == "marelli_fan_relay_1");
+
+        // 2. Verify Simulated Snapshot
+        var snapshot = liveDataService.GetSimulatedSnapshot(ManufacturerOem.MarutiMarelli, 850, 1.0, 15.0);
+        var acVtg = snapshot.FirstOrDefault(s => s.DefinitionId == "marelli_ac_temp_vtg");
+        Assert.NotNull(acVtg);
+        Assert.Equal(0.02, acVtg.ScaledValue); // Matches bench tester LCD: AC_TEMP_VTG =0.02V
+
+        // 3. Verify Mappack
+        var packService = new EcuDefinitionPackService();
+        var mjdPack = packService.MatchPack("MJD 6F3.S1", null, null);
+        Assert.NotNull(mjdPack);
+        Assert.Equal("marelli_mjd_swift_ddis", mjdPack.Id);
+        var railMap = packService.GetMap(mjdPack.Id, "MJD_RailPressure");
+        Assert.NotNull(railMap);
+        Assert.Equal(MapCategory.Fuel, railMap.Category);
+        Assert.Equal("bar", railMap.ZUnit);
+    }
 }

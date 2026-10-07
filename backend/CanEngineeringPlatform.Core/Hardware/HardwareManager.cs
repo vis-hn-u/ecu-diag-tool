@@ -172,16 +172,100 @@ public class HardwareManager : IAutomotiveHardwareManager
             return true;
         }
 
-        if (previousTransport != null)
+        // If both are physical listening hardware (e.g. GVRET and ESP8266 USB), preserve concurrent reception
+        bool isDualHardwareSwitch = (previousTransport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport && newTransport is CanEngineeringPlatform.Core.Hardware.Transports.Esp8266UsbSerialTransport)
+                                 || (previousTransport is CanEngineeringPlatform.Core.Hardware.Transports.Esp8266UsbSerialTransport && newTransport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport);
+
+        if (previousTransport != null && !isDualHardwareSwitch)
         {
             await previousTransport.DisconnectAsync();
         }
 
-        await newTransport.ConnectAsync(cancellationToken);
+        if (!newTransport.GetStatus().IsConnected)
+        {
+            await newTransport.ConnectAsync(cancellationToken);
+        }
 
         OnActiveTransportChanged?.Invoke(newTransport);
         OnHardwareStatusChanged?.Invoke(newTransport.GetStatus());
         return true;
+    }
+
+    public async Task<bool> ConnectTransportAsync(string transportId, CancellationToken cancellationToken = default)
+    {
+        if (!_canTransports.TryGetValue(transportId, out var transport))
+        {
+            return false;
+        }
+
+        if (!transport.GetStatus().IsConnected)
+        {
+            await transport.ConnectAsync(cancellationToken);
+            OnHardwareStatusChanged?.Invoke(transport.GetStatus());
+        }
+        return true;
+    }
+
+    public async Task<bool> DisconnectTransportAsync(string transportId, CancellationToken cancellationToken = default)
+    {
+        if (!_canTransports.TryGetValue(transportId, out var transport))
+        {
+            return false;
+        }
+
+        if (transport.GetStatus().IsConnected)
+        {
+            await transport.DisconnectAsync();
+            OnHardwareStatusChanged?.Invoke(transport.GetStatus());
+        }
+        return true;
+    }
+
+    public async Task<bool> EnableDualHardwareStreamingAsync(string gvretPort = "COM8", string espPort = "COM14", CancellationToken cancellationToken = default)
+    {
+        bool gvretOk = false;
+        bool espOk = false;
+
+        // 1. Configure and connect Arduino Nano GVRET (Channel 0)
+        var gvretTransport = GetTransport(CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.TransportIdentifier)
+                          ?? GetAllTransports().FirstOrDefault(t => t is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport);
+        if (gvretTransport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
+        {
+            gvret.Configure(gvretPort, 500000u, true, 1000000);
+            if (!gvret.GetStatus().IsConnected)
+            {
+                gvretOk = await gvret.ConnectAsync(cancellationToken);
+            }
+            else
+            {
+                gvretOk = true;
+            }
+            OnHardwareStatusChanged?.Invoke(gvret.GetStatus());
+        }
+
+        // 2. Configure and connect ESP8266 USB Serial (Channel 1)
+        var espTransport = GetTransport("esp8266-usb-serial")
+                        ?? GetAllTransports().FirstOrDefault(t => t is CanEngineeringPlatform.Core.Hardware.Transports.Esp8266UsbSerialTransport);
+        if (espTransport is CanEngineeringPlatform.Core.Hardware.Transports.Esp8266UsbSerialTransport espUsb)
+        {
+            espUsb.Configure(espPort, 1);
+            if (!espUsb.GetStatus().IsConnected)
+            {
+                espOk = await espUsb.ConnectAsync(cancellationToken);
+            }
+            else
+            {
+                espOk = true;
+            }
+            OnHardwareStatusChanged?.Invoke(espUsb.GetStatus());
+        }
+
+        return gvretOk || espOk;
+    }
+
+    public IReadOnlyList<ICanTransport> GetConnectedTransports()
+    {
+        return _canTransports.Values.Distinct().Where(t => t.GetStatus().IsConnected).ToList();
     }
 
     public HardwareStatus? GetStatus()
