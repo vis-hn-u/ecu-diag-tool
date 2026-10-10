@@ -44,7 +44,8 @@ export const CanAnalyzerPage: React.FC = () => {
         const idHex = f.id.toString(16).toLowerCase();
         const idDec = f.id.toString();
         const len = f.actualLength ?? (f.isCanFd ? Math.min(64, f.data?.length || 0) : Math.min(8, f.dlc));
-        const dataHex = f.data ? f.data.slice(0, len).map(b => b.toString(16).padStart(2, '0')).join(' ').toLowerCase() : '';
+        const dataBytes = Array.isArray(f.data) ? f.data : [];
+        const dataHex = dataBytes.slice(0, len).map(b => b.toString(16).padStart(2, '0')).join(' ').toLowerCase();
 
         if (!idHex.includes(q) && !idDec.includes(q) && !dataHex.includes(q)) {
           return false;
@@ -262,7 +263,7 @@ export const CanAnalyzerPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="p-2 font-mono text-slate-200 tracking-wider">
-                      {frame.data ? frame.data.slice(0, payloadLen).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ') : ''}
+                      {Array.isArray(frame.data) ? frame.data.slice(0, payloadLen).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ') : ''}
                     </td>
                   </tr>
                 );

@@ -149,7 +149,8 @@ export const FrameInspector: React.FC<FrameInspectorProps> = ({ frame, onClose }
             <tbody className="divide-y divide-can-border">
               {Array.from({ length: Math.max(8, payloadLen) }).map((_, idx) => {
                 const isPresent = idx < payloadLen;
-                const val = isPresent && frame.data ? frame.data[idx] : 0;
+                const dataArr = Array.isArray(frame.data) ? frame.data : [];
+                const val = isPresent && dataArr.length > idx ? dataArr[idx] : 0;
                 const hex = val.toString(16).toUpperCase().padStart(2, '0');
                 const bin = val.toString(2).padStart(8, '0');
                 const ascii = val >= 32 && val <= 126 ? String.fromCharCode(val) : '.';

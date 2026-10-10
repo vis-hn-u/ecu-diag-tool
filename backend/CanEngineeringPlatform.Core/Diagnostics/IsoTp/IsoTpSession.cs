@@ -127,6 +127,7 @@ public class IsoTpSession
         _rxCurrentOffset = firstChunkLen;
 
         State = IsoTpState.ReceivingConsecutiveFrames;
+        Console.WriteLine($"[ISOTP SESSION] FirstFrame on 0x{RxCanId:X3}: TotalLen={length}, TxCanId=0x{TxCanId:X3}");
 
         // Emit Flow Control frame (CTS) if TxCanId is defined
         if (TxCanId != 0)
@@ -148,13 +149,16 @@ public class IsoTpSession
         completedMessage = null;
         if (State != IsoTpState.ReceivingConsecutiveFrames || _rxBuffer == null)
         {
+            Console.WriteLine($"[ISOTP SESSION] Unexpected Consecutive Frame received in state {State} on CAN ID 0x{RxCanId:X}");
             OnTransportError?.Invoke($"Unexpected Consecutive Frame received in state {State} on CAN ID 0x{RxCanId:X}");
             return false;
         }
 
         byte sn = (byte)(frame.Data[0] & 0x0F);
+        Console.WriteLine($"[ISOTP SESSION] ConsecutiveFrame on 0x{RxCanId:X3}: SN={sn}, expected={_rxNextSequenceNumber}, offset={_rxCurrentOffset}/{_rxExpectedLength}");
         if (sn != _rxNextSequenceNumber)
         {
+            Console.WriteLine($"[ISOTP SESSION] Sequence number mismatch on 0x{RxCanId:X}: expected {_rxNextSequenceNumber}, got {sn}");
             OnTransportError?.Invoke($"Sequence number mismatch on 0x{RxCanId:X}: expected {_rxNextSequenceNumber}, got {sn}");
             Reset();
             return false;

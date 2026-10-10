@@ -140,6 +140,214 @@ public static class ObdDecoder
             Decoder = d => Math.Round(((d[0] << 8) | d[1]) / 1000.0, 2),
             Formatter = d => $"{((d[0] << 8) | d[1]) / 1000.0:F2} V"
         });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x01,
+            Name = "MonitorStatusSinceClear",
+            Description = "Monitor Status Since DTCs Cleared",
+            ReturnBytes = 4,
+            Unit = "flags",
+            MinValue = 0,
+            MaxValue = 4294967295,
+            Decoder = d => ((uint)d[0] << 24) | ((uint)d[1] << 16) | ((uint)d[2] << 8) | d[3],
+            Formatter = d => $"MIL: {((d[0] & 0x80) != 0 ? "ON" : "OFF")}, DTCs: {d[0] & 0x7F}"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x06,
+            Name = "ShortTermFuelTrimBank1",
+            Description = "Short Term Fuel Trim - Bank 1",
+            ReturnBytes = 1,
+            Unit = "%",
+            MinValue = -100,
+            MaxValue = 99.2,
+            Decoder = d => Math.Round((d[0] - 128.0) * 100.0 / 128.0, 1),
+            Formatter = d => $"{(d[0] - 128.0) * 100.0 / 128.0:F1} %"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x07,
+            Name = "LongTermFuelTrimBank1",
+            Description = "Long Term Fuel Trim - Bank 1",
+            ReturnBytes = 1,
+            Unit = "%",
+            MinValue = -100,
+            MaxValue = 99.2,
+            Decoder = d => Math.Round((d[0] - 128.0) * 100.0 / 128.0, 1),
+            Formatter = d => $"{(d[0] - 128.0) * 100.0 / 128.0:F1} %"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x08,
+            Name = "ShortTermFuelTrimBank2",
+            Description = "Short Term Fuel Trim - Bank 2",
+            ReturnBytes = 1,
+            Unit = "%",
+            MinValue = -100,
+            MaxValue = 99.2,
+            Decoder = d => Math.Round((d[0] - 128.0) * 100.0 / 128.0, 1),
+            Formatter = d => $"{(d[0] - 128.0) * 100.0 / 128.0:F1} %"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x09,
+            Name = "LongTermFuelTrimBank2",
+            Description = "Long Term Fuel Trim - Bank 2",
+            ReturnBytes = 1,
+            Unit = "%",
+            MinValue = -100,
+            MaxValue = 99.2,
+            Decoder = d => Math.Round((d[0] - 128.0) * 100.0 / 128.0, 1),
+            Formatter = d => $"{(d[0] - 128.0) * 100.0 / 128.0:F1} %"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x0A,
+            Name = "FuelPressure",
+            Description = "Fuel Pressure (Gauge)",
+            ReturnBytes = 1,
+            Unit = "kPa",
+            MinValue = 0,
+            MaxValue = 765,
+            Decoder = d => d[0] * 3.0,
+            Formatter = d => $"{d[0] * 3} kPa"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x0B,
+            Name = "IntakeManifoldPressure",
+            Description = "Intake Manifold Absolute Pressure (MAP)",
+            ReturnBytes = 1,
+            Unit = "kPa",
+            MinValue = 0,
+            MaxValue = 255,
+            Decoder = d => d[0],
+            Formatter = d => $"{d[0]} kPa"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x21,
+            Name = "DistanceTraveledWithMilOn",
+            Description = "Distance Traveled with MIL On",
+            ReturnBytes = 2,
+            Unit = "km",
+            MinValue = 0,
+            MaxValue = 65535,
+            Decoder = d => (d[0] << 8) | d[1],
+            Formatter = d => $"{(d[0] << 8) | d[1]} km"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x31,
+            Name = "DistanceSinceCodesCleared",
+            Description = "Distance Traveled Since Codes Cleared",
+            ReturnBytes = 2,
+            Unit = "km",
+            MinValue = 0,
+            MaxValue = 65535,
+            Decoder = d => (d[0] << 8) | d[1],
+            Formatter = d => $"{(d[0] << 8) | d[1]} km"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x33,
+            Name = "AbsoluteBarometricPressure",
+            Description = "Absolute Barometric Pressure",
+            ReturnBytes = 1,
+            Unit = "kPa",
+            MinValue = 0,
+            MaxValue = 255,
+            Decoder = d => d[0],
+            Formatter = d => $"{d[0]} kPa"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x46,
+            Name = "AmbientAirTemperature",
+            Description = "Ambient Air Temperature",
+            ReturnBytes = 1,
+            Unit = "°C",
+            MinValue = -40,
+            MaxValue = 215,
+            Decoder = d => d[0] - 40.0,
+            Formatter = d => $"{d[0] - 40} °C"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x49,
+            Name = "AcceleratorPedalPositionD",
+            Description = "Accelerator Pedal Position D",
+            ReturnBytes = 1,
+            Unit = "%",
+            MinValue = 0,
+            MaxValue = 100,
+            Decoder = d => Math.Round(d[0] * 100.0 / 255.0, 1),
+            Formatter = d => $"{d[0] * 100.0 / 255.0:F1} %"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x4C,
+            Name = "CommandedThrottleActuator",
+            Description = "Commanded Throttle Actuator",
+            ReturnBytes = 1,
+            Unit = "%",
+            MinValue = 0,
+            MaxValue = 100,
+            Decoder = d => Math.Round(d[0] * 100.0 / 255.0, 1),
+            Formatter = d => $"{d[0] * 100.0 / 255.0:F1} %"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x51,
+            Name = "FuelType",
+            Description = "Fuel Type",
+            ReturnBytes = 1,
+            Unit = "type",
+            MinValue = 0,
+            MaxValue = 255,
+            Decoder = d => d[0],
+            Formatter = d => d[0] switch { 1 => "Gasoline", 2 => "Methanol", 3 => "Ethanol", 4 => "Diesel", 5 => "LPG", 6 => "CNG", 7 => "Propane", 8 => "Battery/Electric", _ => $"Type {d[0]}" }
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x5C,
+            Name = "EngineOilTemperature",
+            Description = "Engine Oil Temperature",
+            ReturnBytes = 1,
+            Unit = "°C",
+            MinValue = -40,
+            MaxValue = 215,
+            Decoder = d => d[0] - 40.0,
+            Formatter = d => $"{d[0] - 40} °C"
+        });
+
+        RegisterPid(new ObdPidDefinition
+        {
+            Pid = 0x5E,
+            Name = "EngineFuelRate",
+            Description = "Engine Fuel Rate",
+            ReturnBytes = 2,
+            Unit = "L/h",
+            MinValue = 0,
+            MaxValue = 3276.75,
+            Decoder = d => Math.Round(((d[0] << 8) | d[1]) * 0.05, 2),
+            Formatter = d => $"{((d[0] << 8) | d[1]) * 0.05:F2} L/h"
+        });
     }
 
     private static void RegisterPid(ObdPidDefinition pid)
@@ -164,7 +372,7 @@ public static class ObdDecoder
 
         byte sid = payload[0];
 
-        // Positive response SID = Mode + 0x40 (0x41, 0x42, 0x43, 0x44, 0x49, etc.)
+        // Positive response SID = Mode + 0x40 (0x41, 0x42, 0x43, 0x44, 0x49, 0x4A, etc.)
         if (sid < 0x41 || sid > 0x4A)
         {
             return new ObdResponse
@@ -192,6 +400,7 @@ public static class ObdDecoder
 
             case ObdMode.StoredDTCs:
             case ObdMode.PendingDTCs:
+            case ObdMode.PermanentDTCs:
                 ParseMode03or07(payload, response);
                 break;
 
@@ -271,7 +480,8 @@ public static class ObdDecoder
 
     private static void ParseMode03or07(byte[] payload, ObdResponse response)
     {
-        // Format: 0x43 <DTC1_MSB> <DTC1_LSB> <DTC2_MSB> <DTC2_LSB> ...
+        // Format A: 0x43 <Count> <DTC1_MSB> <DTC1_LSB> <DTC2_MSB> <DTC2_LSB> ...
+        // Format B: 0x43 <DTC1_MSB> <DTC1_LSB> <DTC2_MSB> <DTC2_LSB> ...
         if (payload.Length < 2)
         {
             response.DecodedSummary = "No DTCs reported";
@@ -279,6 +489,25 @@ public static class ObdDecoder
         }
 
         int offset = 1;
+        // Check if payload[1] is a DTC count byte:
+        if (payload.Length >= 2)
+        {
+            byte possibleCount = payload[1];
+            int bytesWithoutCount = payload.Length - 1;
+            int bytesAfterPossibleCount = payload.Length - 2;
+
+            if (bytesWithoutCount % 2 != 0)
+            {
+                // Odd length without count -> payload[1] is count
+                offset = 2;
+            }
+            else if (possibleCount > 0 && possibleCount <= 127 && bytesAfterPossibleCount == possibleCount * 2)
+            {
+                // Exactly matches count * 2 bytes
+                offset = 2;
+            }
+        }
+
         while (offset + 1 < payload.Length)
         {
             byte b1 = payload[offset];

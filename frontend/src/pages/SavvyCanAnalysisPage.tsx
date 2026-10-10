@@ -84,6 +84,42 @@ export const SavvyCanAnalysisPage: React.FC = () => {
 
   const [togglingListenOnly, setTogglingListenOnly] = useState(false);
 
+  // Synchronize initial buffer when opening page or when frames arrive
+  useEffect(() => {
+    if (frames.length > 0 && displayFrames.length === 0) {
+      setDisplayFrames(frames.slice(-1000));
+      const initialMap = new Map<number, GroupedFrame>();
+      for (const f of frames) {
+        const existing = initialMap.get(f.id);
+        const nowUs = f.timestampUs || Date.now() * 1000;
+        const periodMs = existing && existing.lastTimestampUs > 0 
+          ? Math.round((nowUs - existing.lastTimestampUs) / 1000) 
+          : 0;
+        const changedMask = [false, false, false, false, false, false, false, false];
+        if (existing) {
+          for (let i = 0; i < Math.min(f.dlc, 8); i++) {
+            if (existing.data[i] !== (f.data[i] ?? 0)) {
+              changedMask[i] = true;
+            }
+          }
+        }
+        initialMap.set(f.id, {
+          id: f.id,
+          isExtended: f.isExtended,
+          dlc: f.dlc,
+          data: [...(f.data || [])],
+          prevData: existing ? [...existing.data] : undefined,
+          changedMask,
+          count: (existing?.count || 0) + 1,
+          lastTimestampUs: nowUs,
+          periodMs: periodMs > 0 ? periodMs : (existing?.periodMs || 0),
+          channel: f.channel ?? 0
+        });
+      }
+      setGroupedMap(initialMap);
+    }
+  }, [frames.length]);
+
   // Throttled frame ingestion
   useEffect(() => {
     if (isPaused || frames.length === 0) return;
@@ -118,7 +154,7 @@ export const SavvyCanAnalysisPage: React.FC = () => {
         id: latest.id,
         isExtended: latest.isExtended,
         dlc: latest.dlc,
-        data: [...latest.data],
+        data: [...(latest.data || [])],
         prevData: existing ? [...existing.data] : undefined,
         changedMask,
         count: (existing?.count || 0) + 1,

@@ -221,7 +221,7 @@ public class HardwareManager : IAutomotiveHardwareManager
         return true;
     }
 
-    public async Task<bool> EnableDualHardwareStreamingAsync(string gvretPort = "COM8", string espPort = "COM14", CancellationToken cancellationToken = default)
+    public async Task<bool> EnableDualHardwareStreamingAsync(string gvretPort = "COM8", string espPort = "COM14", uint canBaud = 500000u, bool listenOnly = false, CancellationToken cancellationToken = default)
     {
         bool gvretOk = false;
         bool espOk = false;
@@ -231,7 +231,7 @@ public class HardwareManager : IAutomotiveHardwareManager
                           ?? GetAllTransports().FirstOrDefault(t => t is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport);
         if (gvretTransport is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
         {
-            gvret.Configure(gvretPort, 500000u, true, 1000000);
+            gvret.Configure(gvretPort, canBaud, listenOnly, 1000000);
             if (!gvret.GetStatus().IsConnected)
             {
                 gvretOk = await gvret.ConnectAsync(cancellationToken);

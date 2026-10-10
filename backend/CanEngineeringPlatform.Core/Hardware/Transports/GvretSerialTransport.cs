@@ -620,16 +620,12 @@ public class GvretSerialTransport : ICanTransport
             catch (Exception ex)
             {
                 Interlocked.Increment(ref _serialErrors);
-                _lastError = $"Unexpected read error: {ex.Message}";
-                await Task.Delay(100, token);
+                _lastError = $"Read error: {ex.Message}";
+                break;
             }
         }
 
-        lock (_lock)
-        {
-            _isConnected = false;
-        }
-        NotifyStatusChanged();
+        Disconnect();
     }
 
     private async Task KeepaliveLoopAsync(CancellationToken token)
@@ -877,6 +873,7 @@ public class GvretSerialTransport : ICanTransport
         };
 
         Interlocked.Increment(ref _rxFrameCount);
+        Interlocked.Increment(ref _windowFrames);
         _lastSeenUtc = DateTime.UtcNow;
 
         try
@@ -892,7 +889,6 @@ public class GvretSerialTransport : ICanTransport
 
     private void CalculateRate(int bytesRead)
     {
-        Interlocked.Add(ref _windowFrames, 1);
         var now = DateTime.UtcNow;
         var elapsed = (now - _lastRateCalcUtc).TotalSeconds;
         if (elapsed >= 1.0)

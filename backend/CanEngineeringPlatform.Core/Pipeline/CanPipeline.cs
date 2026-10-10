@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using CanEngineeringPlatform.Core.Dbc;
 using CanEngineeringPlatform.Core.Logging;
 using CanEngineeringPlatform.Core.Models;
+using CanEngineeringPlatform.Core.Signals;
 using CanEngineeringPlatform.Core.Topology;
 
 namespace CanEngineeringPlatform.Core.Pipeline;
@@ -29,12 +30,14 @@ public interface ICanPipeline
     event Action<CanFrameBatch>? OnBatchProcessed;
     long TotalFramesProcessed { get; }
     double CurrentFps { get; }
+    IReadOnlyList<CanFrame> GetRecentFrames(int count = 200);
 }
 
 public class CanPipeline : ICanPipeline, IDisposable
 {
     private readonly ITopologyEngine _topologyEngine;
     private readonly ICanLoggerService _loggerService;
+    private readonly IUnifiedSignalRegistry? _signalRegistry;
     private readonly Channel<CanFrame> _channel;
     private readonly CancellationTokenSource _cts;
     private readonly Task _processingTask;
@@ -43,18 +46,17 @@ public class CanPipeline : ICanPipeline, IDisposable
     private readonly object _dbcLock = new();
 
     private long _totalFrames;
-    // NOTE: _windowFrames is accessed only on the single ProcessQueueAsync thread
-    // (guaranteed by BoundedChannelOptions.SingleReader = true). No Interlocked needed.
     private int _windowFrames;
     private DateTime _lastFpsCalc = DateTime.UtcNow;
-    // _currentFps is written on the pipeline thread and read from any thread.
-    // C# does not allow volatile on double; use a long-bits backing field + Interlocked for safety.
     private long _currentFpsBits;
     private double _currentFps
     {
         get => BitConverter.Int64BitsToDouble(Interlocked.Read(ref _currentFpsBits));
         set => Interlocked.Exchange(ref _currentFpsBits, BitConverter.DoubleToInt64Bits(value));
     }
+
+    private readonly ConcurrentQueue<CanFrame> _recentFrames = new();
+    private const int MaxRecentFrames = 500;
 
     public event Action<CanFrame>? OnFrameReceived;
     public event Action<IReadOnlyList<DecodedSignal>>? OnSignalsDecoded;
@@ -64,9 +66,15 @@ public class CanPipeline : ICanPipeline, IDisposable
     public double CurrentFps => _currentFps;
 
     public CanPipeline(ITopologyEngine topologyEngine, ICanLoggerService loggerService)
+        : this(topologyEngine, loggerService, null)
+    {
+    }
+
+    public CanPipeline(ITopologyEngine topologyEngine, ICanLoggerService loggerService, IUnifiedSignalRegistry? signalRegistry)
     {
         _topologyEngine = topologyEngine;
         _loggerService = loggerService;
+        _signalRegistry = signalRegistry;
 
         // Bounded channel to prevent runaway memory if consumers lag
         _channel = Channel.CreateBounded<CanFrame>(new BoundedChannelOptions(50000)
@@ -236,6 +244,9 @@ BO_ 390 VehicleDynamics_Sim: 8 ABS
         Interlocked.Increment(ref _totalFrames);
         _windowFrames++;
 
+        _recentFrames.Enqueue(frame);
+        while (_recentFrames.Count > MaxRecentFrames && _recentFrames.TryDequeue(out _)) { }
+
         batch.Frames.Add(frame);
         OnFrameReceived?.Invoke(frame);
 
@@ -255,10 +266,20 @@ BO_ 390 VehicleDynamics_Sim: 8 ABS
         if (decodedSignals != null && decodedSignals.Count > 0)
         {
             batch.Signals.AddRange(decodedSignals);
+            _signalRegistry?.IngestDecodedSignals(decodedSignals);
             OnSignalsDecoded?.Invoke(decodedSignals);
         }
 
         _topologyEngine.ProcessFrame(frame, matchedMsg, decodedSignals);
+    }
+
+    public IReadOnlyList<CanFrame> GetRecentFrames(int count = 200)
+    {
+        var frames = _recentFrames.ToArray();
+        if (frames.Length <= count) return frames;
+        var result = new CanFrame[count];
+        Array.Copy(frames, frames.Length - count, result, 0, count);
+        return result;
     }
 
     public void Dispose()

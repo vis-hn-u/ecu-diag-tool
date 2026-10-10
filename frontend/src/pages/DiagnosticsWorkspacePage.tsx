@@ -8,7 +8,9 @@ import {
   EcuIdentification, 
   ObdPidValue, 
   ObdPidDefinition, 
-  VirtualEcu 
+  VirtualEcu,
+  OperatingGridConfig,
+  LiveOperatingGridSnapshot
 } from '../types/diagnostics';
 import { 
   DiagnosticFreezeFrame,
@@ -22,13 +24,14 @@ import {
 import { 
   Wrench, Cpu, Activity, Send, Trash2, RotateCcw, ShieldAlert, CheckCircle2, 
   AlertTriangle, Layers, Gauge, FileText, Radio, Search, Key, RefreshCw,
-  Zap, Lock, ArrowRight, Sliders, Camera, HelpCircle, ExternalLink, Compass, Flame, Sparkles, X
+  Zap, Lock, ArrowRight, Sliders, Camera, HelpCircle, ExternalLink, Compass, Flame, Sparkles, X,
+  Download, Table
 } from 'lucide-react';
 
 export const DiagnosticsWorkspacePage: React.FC = () => {
   const { operatingMode } = useCan();
   const [subTab, setSubTab] = useState<
-    'trace' | 'obd' | 'uds' | 'dtc' | 'freeze-frame' | 'vag-blocks' | 'manufacturer' | 'ecuinfo' | 'simulator'
+    'trace' | 'obd' | 'uds' | 'dtc' | 'freeze-frame' | 'vag-blocks' | 'manufacturer' | 'tuning-grid' | 'ecuinfo' | 'simulator'
   >('trace');
   
   // Core Diagnostics Data state
@@ -38,6 +41,18 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
   const [obdValues, setObdValues] = useState<ObdPidValue[]>([]);
   const [obdDefs, setObdDefs] = useState<ObdPidDefinition[]>([]);
   const [simulatorStatus, setSimulatorStatus] = useState<{ isEnabled: boolean; virtualEcus: VirtualEcu[] } | null>(null);
+
+  // Automatic Mode 01 PID Discovery state
+  const [isDiscoveringPids, setIsDiscoveringPids] = useState<boolean>(false);
+  const [discoveredPids, setDiscoveredPids] = useState<ObdPidDefinition[]>([]);
+  const [pidDiscoveryMessage, setPidDiscoveryMessage] = useState<string | null>(null);
+
+  // Live Operating Envelope / Tuning Map state
+  const [operatingGridId, setOperatingGridId] = useState<string>('rpm_vs_load_lambda');
+  const [operatingGridConfigs, setOperatingGridConfigs] = useState<OperatingGridConfig[]>([]);
+  const [gridSnapshot, setGridSnapshot] = useState<LiveOperatingGridSnapshot | null>(null);
+  const [isGridPolling, setIsGridPolling] = useState<boolean>(true);
+  const [gridActionMessage, setGridActionMessage] = useState<string | null>(null);
 
   // Extended Diagnostics Data state
   const [freezeFrames, setFreezeFrames] = useState<DiagnosticFreezeFrame[]>([]);
@@ -167,6 +182,65 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
     return () => clearInterval(interval);
   }, [selectedOem]);
 
+  // Operating Grid Configs loader
+  useEffect(() => {
+    const fetchConfigs = async () => {
+      try {
+        const cfgs = await api.getOperatingGridConfigs();
+        setOperatingGridConfigs(cfgs || []);
+      } catch {
+        // Ignore
+      }
+    };
+    fetchConfigs();
+  }, []);
+
+  // Operating Grid Live Snapshot Poller
+  useEffect(() => {
+    if (subTab !== 'tuning-grid' || !isGridPolling) return;
+    const fetchGrid = async () => {
+      try {
+        const snap = await api.getOperatingGrid(operatingGridId);
+        setGridSnapshot(snap);
+      } catch {
+        // Ignore
+      }
+    };
+    fetchGrid();
+    const interval = setInterval(fetchGrid, 1000);
+    return () => clearInterval(interval);
+  }, [subTab, operatingGridId, isGridPolling]);
+
+  const handleDiscoverSupportedPids = async () => {
+    setIsDiscoveringPids(true);
+    setPidDiscoveryMessage('Executing sequential Mode 01 bitmap discovery (0x00, 0x20, 0x40, 0x60, 0x80)...');
+    try {
+      const reqId = ecuCanIdMap[targetEcu] || 0x7DF;
+      const pids = await api.discoverSupportedPids(reqId, isSimulation);
+      setDiscoveredPids(pids || []);
+      setObdDefs(pids || []);
+      setPidDiscoveryMessage(`Discovery complete: Found ${pids?.length || 0} standardized Mode 01 PIDs supported by ${targetEcu}.`);
+    } catch (err: any) {
+      setPidDiscoveryMessage(`PID discovery failed: ${err.message || 'Communication error'}`);
+    } finally {
+      setIsDiscoveringPids(false);
+      setTimeout(() => setPidDiscoveryMessage(null), 6000);
+    }
+  };
+
+  const handleResetGrid = async () => {
+    try {
+      await api.resetOperatingGrid(operatingGridId);
+      const snap = await api.getOperatingGrid(operatingGridId);
+      setGridSnapshot(snap);
+      setGridActionMessage(`Operating grid '${operatingGridId}' telemetry reset.`);
+    } catch (e: any) {
+      setGridActionMessage(`Reset failed: ${e.message}`);
+    } finally {
+      setTimeout(() => setGridActionMessage(null), 4000);
+    }
+  };
+
   const handleSendCustomHex = async (hexStr: string) => {
     setIsSending(true);
     try {
@@ -259,6 +333,7 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
             { id: 'freeze-frame', label: `Freeze Frames (${freezeFrames.length})`, icon: Camera },
             { id: 'vag-blocks', label: 'VAG Blocks', icon: Layers },
             { id: 'manufacturer', label: 'Manufacturer Live', icon: Radio },
+            { id: 'tuning-grid', label: 'Tuning Operating Grid', icon: Flame },
             { id: 'ecuinfo', label: 'ECU Inventory', icon: Cpu },
             { id: 'simulator', label: 'ECU Simulator', icon: Sliders }
           ].map(tab => {
@@ -364,36 +439,132 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
           </div>
         )}
 
-        {/* VIEW 2: OBD-II DASHBOARD */}
+        {/* VIEW 2: OBD-II DASHBOARD & PID DISCOVERY */}
         {subTab === 'obd' && (
           <div className="p-5 space-y-4 overflow-y-auto h-full">
-            <div className="flex justify-between items-center border-b border-can-border pb-3 font-sans">
+            <div className="flex flex-wrap justify-between items-center border-b border-can-border pb-3 font-sans gap-3">
               <div>
-                <h2 className="text-sm font-bold text-white uppercase">STANDARD OBD-II (SAE J1979 / ISO 15031-5) LIVE METRICS</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Continuous broadcast PID decoding via diagnostic transport</p>
+                <h2 className="text-sm font-bold text-white uppercase">STANDARD OBD-II (SAE J1979 / ISO 15031-5) LIVE METRICS & PID DISCOVERY</h2>
+                <p className="text-xs text-slate-400 mt-0.5">Continuous broadcast PID decoding and automated supported PID bitmap discovery</p>
               </div>
-              <button
-                onClick={() => handleSendCustomHex('01 00')}
-                className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold"
-              >
-                Poll Supported PIDs
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleDiscoverSupportedPids}
+                  disabled={isDiscoveringPids}
+                  className="px-3 py-1.5 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white rounded text-xs font-bold flex items-center space-x-1.5 shadow"
+                >
+                  {isDiscoveringPids ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                  )}
+                  <span>{isDiscoveringPids ? 'Discovering Bitmaps...' : 'Auto-Discover PIDs (Mode 01)'}</span>
+                </button>
+                <button
+                  onClick={() => handleSendCustomHex('01 00')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded text-xs font-bold"
+                >
+                  Query Bitmap (01 00)
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-sans">
-              {obdValues.map(v => (
-                <div key={v.pid} className="bg-can-bg border border-can-border rounded-lg p-3.5 shadow flex flex-col justify-between">
-                  <div className="flex justify-between text-xs text-slate-400 mb-1">
-                    <span className="font-bold truncate">{v.name}</span>
-                    <span className="font-mono text-[10px] text-sky-400">0x{v.pid.toString(16).toUpperCase().padStart(2, '0')}</span>
+            {/* PID Discovery Status Banner */}
+            {pidDiscoveryMessage && (
+              <div className="p-3 bg-sky-950/70 border border-sky-500/50 rounded-lg flex items-center space-x-2.5 text-xs text-sky-200 font-mono animate-fadeIn">
+                <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>{pidDiscoveryMessage}</span>
+              </div>
+            )}
+
+            {/* Live OBD Values Cards */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-sans">
+                LIVE TELEMETRY PARAMETERS ({obdValues.length} MONITORED)
+              </span>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 font-sans">
+                {obdValues.map(v => (
+                  <div key={v.pid} className="bg-can-bg border border-can-border hover:border-sky-500/40 rounded-lg p-3.5 shadow flex flex-col justify-between">
+                    <div className="flex justify-between text-xs text-slate-400 mb-1">
+                      <span className="font-bold truncate">{v.name}</span>
+                      <span className="font-mono text-[10px] text-sky-400">0x{v.pid.toString(16).toUpperCase().padStart(2, '0')}</span>
+                    </div>
+                    <div className="text-2xl font-bold text-white font-mono my-1">
+                      {v.formattedValue} <span className="text-xs font-sans text-slate-400">{v.unit}</span>
+                    </div>
+                    <div className="text-[10px] text-slate-500 font-mono">PID {v.pid} • Mode 01</div>
                   </div>
-                  <div className="text-2xl font-bold text-white font-mono my-1">
-                    {v.formattedValue} <span className="text-xs font-sans text-slate-400">{v.unit}</span>
+                ))}
+                {obdValues.length === 0 && (
+                  <div className="col-span-4 text-center py-8 text-slate-500 text-xs">
+                    No active OBD-II values broadcast yet. Click "Auto-Discover PIDs" or poll supported PIDs to begin.
                   </div>
-                  <div className="text-[10px] text-slate-500 font-mono">PID {v.pid} • Mode 01</div>
-                </div>
-              ))}
+                )}
+              </div>
             </div>
+
+            {/* Discovered / Supported PIDs Table */}
+            {obdDefs.length > 0 && (
+              <div className="bg-can-bg border border-can-border rounded-lg p-4 space-y-3 font-sans">
+                <div className="flex justify-between items-center border-b border-can-border pb-2">
+                  <div className="flex items-center space-x-2">
+                    <Table className="w-4 h-4 text-sky-400" />
+                    <span className="text-xs font-bold text-white uppercase">
+                      STANDARDIZED OBD-II PID SPECIFICATION & BITMAP PROFILE ({obdDefs.length} DEFINED)
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">SAE J1979 / ISO 15031-5</span>
+                </div>
+
+                <div className="max-h-72 overflow-y-auto">
+                  <table className="w-full text-left text-xs font-mono">
+                    <thead className="text-[10px] uppercase text-slate-400 bg-slate-900 sticky top-0 border-b border-slate-800">
+                      <tr>
+                        <th className="py-2 px-3">PID</th>
+                        <th className="py-2 px-3 font-sans">Signal / Parameter</th>
+                        <th className="py-2 px-3 font-sans">Description</th>
+                        <th className="py-2 px-3">Bytes</th>
+                        <th className="py-2 px-3">Range & Unit</th>
+                        <th className="py-2 px-3 text-right">Support Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-slate-300">
+                      {obdDefs.map(def => {
+                        const isDiscovered = discoveredPids.some(d => d.pid === def.pid);
+                        return (
+                          <tr key={def.pid} className="hover:bg-slate-800/40">
+                            <td className="py-2 px-3 text-sky-400 font-bold">
+                              0x{def.pid.toString(16).toUpperCase().padStart(2, '0')}
+                            </td>
+                            <td className="py-2 px-3 text-white font-sans font-semibold">
+                              {def.name}
+                            </td>
+                            <td className="py-2 px-3 text-slate-400 font-sans text-[11px] truncate max-w-xs">
+                              {def.description}
+                            </td>
+                            <td className="py-2 px-3 text-slate-400">
+                              {def.returnBytes} B
+                            </td>
+                            <td className="py-2 px-3 text-slate-400 text-[11px]">
+                              {def.minValue} .. {def.maxValue} {def.unit}
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                isDiscovered
+                                  ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/70'
+                                  : 'bg-slate-800 text-slate-400 border border-slate-700/60'
+                              }`}>
+                                {isDiscovered ? 'ECU SUPPORTED' : 'SUPPORTED'}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -574,15 +745,74 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                 <div key={`${dtc.ecuName}-${dtc.code}`} className="bg-can-bg border border-can-border hover:border-rose-500/40 rounded-lg p-4 shadow space-y-3">
                   <div className="flex justify-between items-start">
                     <div className="flex items-center space-x-2">
-                      <span className="text-lg font-bold text-rose-400 font-mono">{dtc.code}</span>
-                      <span className="text-[10px] text-slate-400 bg-slate-800 px-2 py-0.5 rounded font-semibold">
-                        ECU: {dtc.ecuName} (0x{dtc.canId.toString(16).toUpperCase()})
+                      <span className="text-xl font-bold text-rose-400 font-mono">{dtc.code}</span>
+                      <span className="text-[10px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono font-bold">
+                        ECU: {dtc.ecuName} ({dtc.ecuAddress || `0x${(dtc.responseCanId || dtc.canId).toString(16).toUpperCase()}`})
+                      </span>
+                      <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold uppercase bg-sky-950 text-sky-300 border border-sky-800/60">
+                        {dtc.protocol || 'UDS'}
+                      </span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold uppercase border ${
+                        dtc.confidence === 'CONFIRMED' || dtc.isConfirmed
+                          ? 'bg-rose-950 text-rose-300 border-rose-800/80'
+                          : 'bg-amber-950 text-amber-300 border-amber-800/80'
+                      }`}>
+                        {dtc.confidence || (dtc.isConfirmed ? 'CONFIRMED' : 'PENDING')}
                       </span>
                     </div>
-                    <span className="text-xs font-mono text-slate-500">Status: 0x{dtc.statusByte.toString(16).toUpperCase().padStart(2, '0')}</span>
+                    <span className="text-xs font-mono font-bold text-amber-400">
+                      Status: 0x{dtc.statusByte.toString(16).toUpperCase().padStart(2, '0')}
+                    </span>
                   </div>
 
-                  <p className="text-xs text-slate-200 font-medium">{dtc.description}</p>
+                  <p className="text-xs text-slate-100 font-semibold">{dtc.description}</p>
+
+                  {/* Complete CAN Forensic Telemetry Panel */}
+                  <div className="p-2.5 bg-slate-950/70 border border-slate-800/80 rounded font-mono text-[11px] space-y-1.5">
+                    <div className="grid grid-cols-2 gap-2 text-slate-400">
+                      <div>
+                        <span>Request ID:</span>{' '}
+                        <strong className="text-sky-300">
+                          0x{(dtc.requestCanId || (dtc.canId >= 0x7E8 ? dtc.canId - 8 : 0x7E0)).toString(16).toUpperCase()}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Response ID:</span>{' '}
+                        <strong className="text-emerald-300">
+                          0x{(dtc.responseCanId || dtc.canId).toString(16).toUpperCase()}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Service / Subfn:</span>{' '}
+                        <strong className="text-white">
+                          0x{(dtc.service || (dtc.protocol === 'OBD-II' ? 0x03 : 0x19)).toString(16).toUpperCase()}
+                          {dtc.subfunction !== undefined && dtc.subfunction !== null ? ` / 0x${dtc.subfunction.toString(16).toUpperCase().padStart(2, '0')}` : ''}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Raw DTC Bytes:</span>{' '}
+                        <strong className="text-amber-300">
+                          {dtc.rawDtcBytesHex || dtc.code}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {dtc.rawCompleteResponseHex && (
+                      <div className="pt-1 border-t border-slate-800/60 truncate text-slate-400">
+                        <span>Raw Frame:</span>{' '}
+                        <span className="text-slate-300 select-all font-mono">
+                          {dtc.rawCompleteResponseHex}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-between items-center text-[10px] text-slate-500 pt-0.5">
+                      <span>Source: {dtc.sourceDatabase || 'SAE J2012 / OEM Matrix'}</span>
+                      {dtc.occurrenceCount !== undefined && dtc.occurrenceCount !== null && (
+                        <span>Occurrences: {dtc.occurrenceCount}</span>
+                      )}
+                    </div>
+                  </div>
 
                   <div className="flex flex-wrap gap-1.5 pt-1">
                     {dtc.activeStatusFlags?.map(flag => (
@@ -824,6 +1054,239 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* VIEW: LIVE OPERATING ENVELOPE / TUNING GRID */}
+        {subTab === 'tuning-grid' && (
+          <div className="p-5 space-y-5 overflow-y-auto h-full font-sans">
+            {/* Header with Strict Engineering Disclaimer */}
+            <div className="flex flex-wrap items-center justify-between border-b border-can-border pb-3 gap-3">
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h2 className="text-sm font-bold text-white uppercase tracking-wider">
+                    LIVE CAN OPERATING ENVELOPE (TUNING & CALIBRATION ANALYSIS)
+                  </h2>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-950 text-amber-300 border border-amber-800/80">
+                    CAN TELEMETRY ONLY — NOT AN ECU FLASH MAP
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Multi-dimensional operating matrix accumulated in real time from canonical CAN signals. Unsampled cells are strictly rendered as NO DATA without interpolation.
+                </p>
+              </div>
+
+              {/* Action Toolbar */}
+              <div className="flex items-center space-x-2 text-xs">
+                {/* Preset Selector */}
+                <select
+                  value={operatingGridId}
+                  onChange={e => setOperatingGridId(e.target.value)}
+                  className="bg-can-bg border border-can-border rounded px-3 py-1.5 text-white font-bold text-sky-400 font-mono"
+                >
+                  {operatingGridConfigs.length > 0 ? (
+                    operatingGridConfigs.map(c => (
+                      <option key={c.gridId} value={c.gridId}>
+                        {c.name}
+                      </option>
+                    ))
+                  ) : (
+                    <>
+                      <option value="rpm_vs_load_lambda">RPM × Load → Lambda</option>
+                      <option value="rpm_vs_boost_railpressure">RPM × Boost → Rail Pressure</option>
+                      <option value="rpm_vs_tps_torque">RPM × Throttle → Engine Torque</option>
+                    </>
+                  )}
+                </select>
+
+                <button
+                  onClick={() => setIsGridPolling(!isGridPolling)}
+                  className={`px-3 py-1.5 rounded text-xs font-bold flex items-center space-x-1 border ${
+                    isGridPolling
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
+                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                  }`}
+                >
+                  <Activity className="w-3.5 h-3.5" />
+                  <span>{isGridPolling ? 'Live Streaming' : 'Paused'}</span>
+                </button>
+
+                <button
+                  onClick={handleResetGrid}
+                  className="px-3 py-1.5 bg-rose-950/70 hover:bg-rose-900 text-rose-300 border border-rose-800/80 rounded text-xs font-bold flex items-center space-x-1"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Reset Grid</span>
+                </button>
+
+                <a
+                  href={api.exportOperatingGridCsvUrl(operatingGridId)}
+                  download={`${operatingGridId}_telemetry_grid.csv`}
+                  className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold flex items-center space-x-1 shadow"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Export CSV</span>
+                </a>
+              </div>
+            </div>
+
+            {/* Grid Action Message */}
+            {gridActionMessage && (
+              <div className="p-3 bg-sky-950/70 border border-sky-500/50 rounded-lg flex items-center space-x-2.5 text-xs text-sky-200 font-mono animate-fadeIn">
+                <Sparkles className="w-4 h-4 text-sky-400 shrink-0" />
+                <span>{gridActionMessage}</span>
+              </div>
+            )}
+
+            {/* Metrics Overview Bar */}
+            {gridSnapshot && (
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 font-mono">
+                <div className="bg-can-bg border border-can-border rounded-lg p-3">
+                  <div className="text-slate-400 text-[10px] uppercase font-sans">Total Samples Recorded</div>
+                  <div className="text-xl font-bold text-sky-400 mt-1">
+                    {gridSnapshot.totalSamples.toLocaleString()}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-sans mt-0.5">Welford variance tracking</div>
+                </div>
+
+                <div className="bg-can-bg border border-can-border rounded-lg p-3">
+                  <div className="text-slate-400 text-[10px] uppercase font-sans">Active Operating Cells</div>
+                  <div className="text-xl font-bold text-emerald-400 mt-1">
+                    {gridSnapshot.activeCellCount} <span className="text-xs text-slate-400 font-normal">/ {(gridSnapshot.config.xBinEdges.length) * (gridSnapshot.config.yBinEdges.length)}</span>
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-sans mt-0.5">
+                    {(((gridSnapshot.activeCellCount / Math.max(1, (gridSnapshot.config.xBinEdges.length) * (gridSnapshot.config.yBinEdges.length)))) * 100).toFixed(1)}% coverage
+                  </div>
+                </div>
+
+                <div className="bg-can-bg border border-can-border rounded-lg p-3">
+                  <div className="text-slate-400 text-[10px] uppercase font-sans">X-Axis Parameter</div>
+                  <div className="text-sm font-bold text-white mt-1 truncate">
+                    {gridSnapshot.config.xSignalName}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-sans mt-0.5">
+                    {gridSnapshot.config.xBinEdges[0]} .. {gridSnapshot.config.xBinEdges[gridSnapshot.config.xBinEdges.length - 1]}
+                  </div>
+                </div>
+
+                <div className="bg-can-bg border border-can-border rounded-lg p-3">
+                  <div className="text-slate-400 text-[10px] uppercase font-sans">Y-Axis Parameter</div>
+                  <div className="text-sm font-bold text-white mt-1 truncate">
+                    {gridSnapshot.config.ySignalName}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-sans mt-0.5">
+                    {gridSnapshot.config.yBinEdges[0]} .. {gridSnapshot.config.yBinEdges[gridSnapshot.config.yBinEdges.length - 1]}
+                  </div>
+                </div>
+
+                <div className="bg-can-bg border border-can-border rounded-lg p-3">
+                  <div className="text-slate-400 text-[10px] uppercase font-sans">Target Observed Signal</div>
+                  <div className="text-sm font-bold text-amber-300 mt-1 truncate">
+                    {gridSnapshot.config.zSignalName} ({gridSnapshot.config.zUnit})
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-sans mt-0.5">Canonical registry metric</div>
+                </div>
+              </div>
+            )}
+
+            {/* 2D Operating Grid Matrix Table */}
+            {gridSnapshot ? (
+              <div className="bg-can-bg border border-can-border rounded-lg p-4 space-y-3 font-sans">
+                <div className="flex justify-between items-center border-b border-can-border pb-2">
+                  <div className="flex items-center space-x-2">
+                    <Flame className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-bold text-white uppercase">
+                      {gridSnapshot.config.name}
+                    </span>
+                  </div>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    Updated: {new Date(gridSnapshot.timestampUtc).toLocaleTimeString()}
+                  </span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-center text-xs font-mono border-collapse">
+                    <thead>
+                      <tr>
+                        <th className="p-2 border border-slate-800 bg-slate-900 text-slate-400 text-[10px] uppercase sticky left-0 z-10 font-bold min-w-[100px]">
+                          {gridSnapshot.config.ySignalName} ↓ \ {gridSnapshot.config.xSignalName} →
+                        </th>
+                        {gridSnapshot.config.xBinEdges.map((xVal, xi) => (
+                          <th key={xi} className="p-2 border border-slate-800 bg-slate-900 text-sky-300 font-bold text-[11px] min-w-[85px]">
+                            {xVal}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gridSnapshot.config.yBinEdges.map((yVal, yi) => (
+                        <tr key={yi}>
+                          <th className="p-2 border border-slate-800 bg-slate-900 text-amber-300 font-bold text-[11px] sticky left-0 z-10 text-left">
+                            {yVal}
+                          </th>
+                          {gridSnapshot.config.xBinEdges.map((_, xi) => {
+                            const bucket = gridSnapshot.cells[yi]?.[xi];
+                            const hasData = bucket && bucket.sampleCount > 0;
+                            return (
+                              <td
+                                key={xi}
+                                className={`p-2 border border-slate-800 transition-colors relative group ${
+                                  hasData
+                                    ? 'bg-slate-800/80 hover:bg-slate-700/80 text-white cursor-pointer'
+                                    : 'bg-slate-950/60 text-slate-600'
+                                }`}
+                                title={
+                                  hasData
+                                    ? `X: ${bucket.xCenter}, Y: ${bucket.yCenter}\nMean: ${bucket.mean?.toFixed(3)}\nMin: ${bucket.min?.toFixed(3)}\nMax: ${bucket.max?.toFixed(3)}\nStdDev: ${bucket.stdDev?.toFixed(3)}\nSamples: ${bucket.sampleCount}`
+                                    : 'NO DATA — Engine has not operated at this operating point'
+                                }
+                              >
+                                {hasData ? (
+                                  <div>
+                                    <div className="font-bold text-xs text-emerald-300">
+                                      {bucket.mean !== null && bucket.mean !== undefined ? bucket.mean.toFixed(2) : '—'}
+                                    </div>
+                                    <div className="text-[9px] text-slate-400 mt-0.5">
+                                      N={bucket.sampleCount}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="text-[10px] text-slate-600 font-sans tracking-wide">
+                                    —
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Grid Legend & Forensic Assurance */}
+                <div className="flex flex-wrap items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800/80">
+                  <div className="flex items-center space-x-4">
+                    <span className="flex items-center space-x-1.5">
+                      <span className="w-3 h-3 rounded-sm bg-slate-800 border border-slate-700 inline-block"></span>
+                      <span>Active Cell (Mean ± StdDev)</span>
+                    </span>
+                    <span className="flex items-center space-x-1.5">
+                      <span className="w-3 h-3 rounded-sm bg-slate-950 border border-slate-800 inline-block"></span>
+                      <span>Unsampled Area (NO DATA)</span>
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    Truthful Telemetry Assurance: Zero interpolation applied.
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-20 text-center text-slate-500">
+                <Flame className="w-8 h-8 mx-auto mb-2 opacity-40 animate-pulse" />
+                <p>Loading operating envelope telemetry...</p>
+              </div>
+            )}
           </div>
         )}
 

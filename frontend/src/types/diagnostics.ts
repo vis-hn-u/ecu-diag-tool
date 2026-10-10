@@ -37,6 +37,18 @@ export interface DiagnosticTroubleCode {
   isTestNotCompleted?: boolean;
   rawEvidenceHex?: string;
   activeStatusFlags: string[];
+  requestCanId?: number;
+  responseCanId?: number;
+  ecuAddress?: string;
+  protocol?: string;
+  service?: number;
+  subfunction?: number | null;
+  decodedStatus?: string;
+  rawDtcBytesHex?: string;
+  rawCompleteResponseHex?: string;
+  sourceDatabase?: string;
+  confidence?: string;
+  occurrenceCount?: number | null;
 }
 
 export type DtcClearStatus = 
@@ -115,4 +127,39 @@ export interface VirtualEcu {
   activeSession: number;
   securityUnlocked: boolean;
   troubleCodes: DiagnosticTroubleCode[];
+}
+
+export interface OperatingGridConfig {
+  gridId: string;
+  name: string;
+  description: string;
+  xSignalName: string;
+  xBinEdges: number[];
+  ySignalName: string;
+  yBinEdges: number[];
+  zSignalName: string;
+  zUnit: string;
+}
+
+export interface OperatingCellBucket {
+  xIndex: number;
+  yIndex: number;
+  xCenter: number;
+  yCenter: number;
+  sampleCount: number;
+  mean: number | null;
+  min: number | null;
+  max: number | null;
+  stdDev: number | null;
+  latest: number | null;
+  hasData: boolean;
+}
+
+export interface LiveOperatingGridSnapshot {
+  config: OperatingGridConfig;
+  totalSamples: number;
+  activeCellCount: number;
+  cells: OperatingCellBucket[][];
+  timestampUtc: string;
+  disclaimer: string;
 }

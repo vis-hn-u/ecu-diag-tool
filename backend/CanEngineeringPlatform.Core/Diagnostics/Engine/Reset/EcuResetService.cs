@@ -86,7 +86,7 @@ public class EcuResetService : IEcuResetService
         var exchange = await _sessionService.SendRequestAsync(request.RequestCanId, payload, request.EcuName, isSimulation: true);
 
         int waited = 0;
-        while (!exchange.IsComplete && waited < 800)
+        while (!exchange.IsComplete && waited < 2500)
         {
             await Task.Delay(25, cancellationToken);
             waited += 25;

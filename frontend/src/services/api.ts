@@ -36,7 +36,11 @@ import {
   CopilotQueryRequest,
   CopilotResponse
 } from '../types';
-import { DiagnosticExchange, DiagnosticTroubleCode, DtcClearVerificationResult, EcuIdentification, ObdPidValue, ObdPidDefinition, VirtualEcu } from '../types/diagnostics';
+import { 
+  DiagnosticExchange, DiagnosticTroubleCode, DtcClearVerificationResult, EcuIdentification, 
+  ObdPidValue, ObdPidDefinition, VirtualEcu,
+  OperatingGridConfig, LiveOperatingGridSnapshot
+} from '../types/diagnostics';
 import { 
   EngineOutputs, EngineParameters, EngineInputs, DynoPullSummary, VehiclePerformanceSummary, 
   CalibrationProject, CalibrationTable, CalibrationDiffCell, CalibrationEditRecord,
@@ -257,6 +261,30 @@ export const api = {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ listenOnly })
+      });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
+  setGvretBitrate: async (bitrate: number): Promise<any> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/gvret/bitrate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bitrate })
+      });
+      return await res.json();
+    } catch {
+      return null;
+    }
+  },
+  sendBenchPing: async (options?: { id?: number; isExtended?: boolean; data?: number[] }): Promise<any> => {
+    try {
+      const res = await fetch(`${API_BASE}/hardware/gvret/bench-ping`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(options || {})
       });
       return await res.json();
     } catch {
@@ -570,6 +598,18 @@ export const api = {
     const res = await fetch(`${API_BASE}/diagnostics/obd-live`);
     return res.json();
   },
+  discoverSupportedPids: async (requestCanId: number = 0x7DF, isSimulation: boolean = true): Promise<ObdPidDefinition[]> => {
+    const res = await fetch(`${API_BASE}/diagnostics/discover-pids?requestCanId=${requestCanId}&isSimulation=${isSimulation}`, { method: 'POST' });
+    return res.json();
+  },
+  getCanonicalSignals: async (): Promise<any[]> => {
+    const res = await fetch(`${API_BASE}/diagnostics/canonical-signals`);
+    return res.json();
+  },
+  getActiveCanonicalSignals: async (): Promise<any[]> => {
+    const res = await fetch(`${API_BASE}/diagnostics/canonical-signals/active`);
+    return res.json();
+  },
   getSimulatorStatus: async (): Promise<{ isEnabled: boolean; virtualEcus: VirtualEcu[] }> => {
     const res = await fetch(`${API_BASE}/diagnostics/simulator/status`);
     return res.json();
@@ -786,6 +826,31 @@ export const api = {
   resetAllCalibrationToStock: async (): Promise<any> => {
     const res = await fetch(`${API_BASE}/calibration/reset-all`, { method: 'POST' });
     return res.json();
+  },
+
+  // Live Operating Envelope / Tuning Map (Observed CAN Telemetry Grid)
+  getOperatingGrid: async (gridId: string = 'rpm_vs_load_lambda'): Promise<LiveOperatingGridSnapshot> => {
+    const res = await fetch(`${API_BASE}/tuning/grid/${gridId}`);
+    return res.json();
+  },
+  getOperatingGridConfigs: async (): Promise<OperatingGridConfig[]> => {
+    const res = await fetch(`${API_BASE}/tuning/configs`);
+    return res.json();
+  },
+  configureOperatingGrid: async (config: OperatingGridConfig): Promise<LiveOperatingGridSnapshot> => {
+    const res = await fetch(`${API_BASE}/tuning/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config)
+    });
+    return res.json();
+  },
+  resetOperatingGrid: async (gridId: string = 'rpm_vs_load_lambda'): Promise<any> => {
+    const res = await fetch(`${API_BASE}/tuning/reset/${gridId}`, { method: 'POST' });
+    return res.json();
+  },
+  exportOperatingGridCsvUrl: (gridId: string = 'rpm_vs_load_lambda'): string => {
+    return `${API_BASE}/tuning/export/csv/${gridId}`;
   },
 
   // Live ECU Data (Phase 5 - Domain A)

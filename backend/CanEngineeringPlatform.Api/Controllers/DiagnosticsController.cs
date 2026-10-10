@@ -14,6 +14,7 @@ using CanEngineeringPlatform.Core.Diagnostics.Session;
 using CanEngineeringPlatform.Core.Diagnostics.Simulator;
 using CanEngineeringPlatform.Core.Diagnostics.Uds;
 using CanEngineeringPlatform.Core.Diagnostics.Vag;
+using CanEngineeringPlatform.Core.Signals;
 
 namespace CanEngineeringPlatform.Api.Controllers;
 
@@ -56,6 +57,7 @@ public class DiagnosticsController : ControllerBase
     private readonly IDtcCorrelationService _dtcCorrelationService;
     private readonly IVagMeasuringBlockService _vagService;
     private readonly IManufacturerLiveDataService _manufacturerService;
+    private readonly IUnifiedSignalRegistry? _signalRegistry;
     private readonly IHubContext<CanHub, ICanHubClient> _hubContext;
 
     public DiagnosticsController(
@@ -65,7 +67,8 @@ public class DiagnosticsController : ControllerBase
         IDtcCorrelationService dtcCorrelationService,
         IVagMeasuringBlockService vagService,
         IManufacturerLiveDataService manufacturerService,
-        IHubContext<CanHub, ICanHubClient> hubContext)
+        IHubContext<CanHub, ICanHubClient> hubContext,
+        IUnifiedSignalRegistry? signalRegistry = null)
     {
         _diagnosticService = diagnosticService;
         _ecuSimulator = ecuSimulator;
@@ -74,6 +77,7 @@ public class DiagnosticsController : ControllerBase
         _vagService = vagService;
         _manufacturerService = manufacturerService;
         _hubContext = hubContext;
+        _signalRegistry = signalRegistry;
 
         _diagnosticService.OnExchangeUpdated += async exchange =>
         {
@@ -148,6 +152,29 @@ public class DiagnosticsController : ControllerBase
             values,
             supportedDefinitions = definitions
         });
+    }
+
+    [HttpPost("discover-pids")]
+    public async Task<ActionResult<IReadOnlyList<ObdPidDefinition>>> DiscoverSupportedPids(
+        [FromQuery] uint requestCanId = 0x7DF, 
+        [FromQuery] bool isSimulation = true)
+    {
+        var pids = await _diagnosticService.DiscoverSupportedPidsAsync(requestCanId, isSimulation);
+        return Ok(pids);
+    }
+
+    [HttpGet("canonical-signals")]
+    public ActionResult<IReadOnlyList<CanonicalSignalRecord>> GetCanonicalSignals()
+    {
+        if (_signalRegistry == null) return Ok(Array.Empty<CanonicalSignalRecord>());
+        return Ok(_signalRegistry.GetAllSignals());
+    }
+
+    [HttpGet("canonical-signals/active")]
+    public ActionResult<IReadOnlyList<CanonicalSignalRecord>> GetActiveCanonicalSignals()
+    {
+        if (_signalRegistry == null) return Ok(Array.Empty<CanonicalSignalRecord>());
+        return Ok(_signalRegistry.GetActiveSignals());
     }
 
     // Freeze-Frame / Event Snapshots

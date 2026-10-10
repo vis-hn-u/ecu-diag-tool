@@ -71,11 +71,15 @@ public class GatewayClientService : BackgroundService, IGatewayService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("Hardware Gateway Service starting concurrent dual hardware streaming (Nano COM8 + ESP8266 COM14)...");
+        _logger.LogInformation("Hardware Gateway Service starting dual hardware streaming (Auto-detecting COM8 & ESP USB)...");
         try
         {
-            // Auto-enable dual hardware ingestion on startup if ports are present
-            await _hardwareManager.EnableDualHardwareStreamingAsync("COM8", "COM14", stoppingToken);
+            var initialPorts = GvretSerialTransport.GetAvailablePorts();
+            string nanoPort = initialPorts.FirstOrDefault(p => p.Equals("COM8", StringComparison.OrdinalIgnoreCase)) ?? "COM8";
+            string espPort = initialPorts.FirstOrDefault(p => !p.Equals(nanoPort, StringComparison.OrdinalIgnoreCase)) ?? "COM13";
+
+            // Auto-enable dual hardware ingestion on startup if ports are present (Normal mode enabled so MCP2515 drives ACKs)
+            await _hardwareManager.EnableDualHardwareStreamingAsync(nanoPort, espPort, 500000u, false, stoppingToken);
 
             // Only auto-connect USB transports — never auto-connect the Wi-Fi WebSocket adapter.
             var active = _hardwareManager.GetActiveTransport();
@@ -92,23 +96,31 @@ public class GatewayClientService : BackgroundService, IGatewayService
                 try
                 {
                     var availablePorts = GvretSerialTransport.GetAvailablePorts();
-                    if (availablePorts.Contains("COM8", StringComparer.OrdinalIgnoreCase))
+                    var gvret = _hardwareManager.GetTransport(CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.TransportIdentifier) 
+                             as CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport;
+
+                    if (availablePorts.Contains(nanoPort, StringComparer.OrdinalIgnoreCase))
                     {
-                        var gvret = _hardwareManager.GetTransport(CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.TransportIdentifier);
                         if (gvret != null && !gvret.GetStatus().IsConnected)
                         {
                             await gvret.ConnectAsync(stoppingToken);
                         }
                     }
 
-                    if (availablePorts.Contains("COM14", StringComparer.OrdinalIgnoreCase))
+                    string? detectedEsp = availablePorts.FirstOrDefault(p => !p.Equals(nanoPort, StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrEmpty(detectedEsp))
                     {
                         var espUsb = _hardwareManager.GetTransport("esp8266-usb-serial");
-                        if (espUsb != null && !espUsb.GetStatus().IsConnected)
+                        if (espUsb is CanEngineeringPlatform.Core.Hardware.Transports.Esp8266UsbSerialTransport usbTransport)
                         {
-                            await espUsb.ConnectAsync(stoppingToken);
+                            if (!usbTransport.GetStatus().IsConnected)
+                            {
+                                usbTransport.Configure(detectedEsp, 1);
+                                await usbTransport.ConnectAsync(stoppingToken);
+                            }
                         }
                     }
+
                 }
                 catch
                 {

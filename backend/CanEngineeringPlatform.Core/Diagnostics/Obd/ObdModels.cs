@@ -13,7 +13,8 @@ public enum ObdMode : byte
     OnBoardMonitoring = 0x06,
     PendingDTCs = 0x07,
     ControlOperation = 0x08,
-    VehicleInformation = 0x09
+    VehicleInformation = 0x09,
+    PermanentDTCs = 0x0A
 }
 
 public class ObdPidDefinition
@@ -25,7 +26,9 @@ public class ObdPidDefinition
     public string Unit { get; set; } = string.Empty;
     public double MinValue { get; set; }
     public double MaxValue { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
     public Func<byte[], double>? Decoder { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
     public Func<byte[], string>? Formatter { get; set; }
 }
 

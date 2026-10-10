@@ -64,8 +64,9 @@ export const HardwareManagerPage: React.FC = () => {
   const [loadingGvretPorts, setLoadingGvretPorts] = useState(false);
   const [gvretBusSpeed, setGvretBusSpeed] = useState<number>(500000);
   const [gvretUartBaud, setGvretUartBaud] = useState<number>(1000000);
-  const [gvretListenOnly, setGvretListenOnly] = useState<boolean>(true);
+  const [gvretListenOnly, setGvretListenOnly] = useState<boolean>(false);
   const [savingGvret, setSavingGvret] = useState(false);
+  const [benchPinging, setBenchPinging] = useState(false);
 
   // Test transmit state
   const [testId, setTestId] = useState<string>('7DF');
@@ -140,6 +141,41 @@ export const HardwareManagerPage: React.FC = () => {
     }
   };
 
+  const handleSendBenchPing = async (extended: boolean = false) => {
+    setBenchPinging(true);
+    try {
+      const res = await api.sendBenchPing({
+        id: extended ? 0x18DB33F1 : 0x7DF,
+        isExtended: extended,
+        data: [2, 1, 0, 0, 0, 0, 0, 0]
+      });
+      if (res?.success) {
+        setSwitchMessage(`Bench wake-up ping transmitted (${res.id} - ACK active)`);
+      } else {
+        setSwitchMessage('Bench wake-up ping transmitted');
+      }
+      await refreshHardwareStatus();
+    } catch {
+      setSwitchMessage('Failed to transmit bench wake-up ping');
+    } finally {
+      setBenchPinging(false);
+      setTimeout(() => setSwitchMessage(null), 4000);
+    }
+  };
+
+  const handleQuickBitrate = async (bitrate: number) => {
+    setGvretBusSpeed(bitrate);
+    try {
+      await api.setGvretBitrate(bitrate);
+      setSwitchMessage(`GVRET bus bitrate set to ${bitrate / 1000} kbps`);
+      await refreshHardwareStatus();
+    } catch {
+      setSwitchMessage('Failed to set GVRET bitrate');
+    } finally {
+      setTimeout(() => setSwitchMessage(null), 4000);
+    }
+  };
+
   useEffect(() => {
     loadElmPorts();
     loadEspUsbPorts();
@@ -176,6 +212,11 @@ export const HardwareManagerPage: React.FC = () => {
         const t = hardwareStatus.extendedTelemetry as any;
         if (t.comPort && t.comPort !== 'None') setGvretPort(t.comPort);
         if (t.listenOnly !== undefined) setGvretListenOnly(t.listenOnly);
+        else if (t.ListenOnly !== undefined) setGvretListenOnly(t.ListenOnly);
+        if (t.busSpeed && typeof t.busSpeed === 'string') {
+          if (t.busSpeed.includes('250')) setGvretBusSpeed(250000);
+          else if (t.busSpeed.includes('500')) setGvretBusSpeed(500000);
+        }
       } else if (hardwareStatus.transportId === 'elm327-adapter' && hardwareStatus.extendedTelemetry) {
         const t = hardwareStatus.extendedTelemetry as any;
         if (t.portName) setElmPort(t.portName);
@@ -1450,11 +1491,69 @@ export const HardwareManagerPage: React.FC = () => {
               >
                 {savingGvret ? 'Applying...' : 'Apply GVRET Hardware Settings'}
               </button>
+
+              {/* Bench ECU Quick Controls */}
+              <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                <div className="text-[10px] text-indigo-400 uppercase font-bold flex items-center justify-between">
+                  <span>Bench Quick Actions:</span>
+                  <span className="text-[9px] text-slate-500 font-normal">ACKs Active</span>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickBitrate(500000)}
+                    className="py-1 px-1.5 rounded bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-800/40 text-[10px] font-mono transition-colors"
+                    title="Switch MCP2515 to 500 kbps (Standard Passenger Car CAN)"
+                  >
+                    500k (OBD-II)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleQuickBitrate(250000)}
+                    className="py-1 px-1.5 rounded bg-indigo-950/40 hover:bg-indigo-900/60 text-indigo-300 border border-indigo-800/40 text-[10px] font-mono transition-colors"
+                    title="Switch MCP2515 to 250 kbps (J1939 / Commercial Vehicle / EDC)"
+                  >
+                    250k (J1939)
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => handleSendBenchPing(false)}
+                    disabled={benchPinging}
+                    className="py-1 px-1.5 rounded bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono transition-colors"
+                    title="Send standard 11-bit OBD-II diagnostic ping (0x7DF [02 01 00 ...])"
+                  >
+                    {benchPinging ? 'Pinging...' : 'Wake 11-bit (0x7DF)'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleSendBenchPing(true)}
+                    disabled={benchPinging}
+                    className="py-1 px-1.5 rounded bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800/40 text-[10px] font-mono transition-colors"
+                    title="Send extended 29-bit J1939/OBD diagnostic ping (0x18DB33F1 [02 01 00 ...])"
+                  >
+                    {benchPinging ? 'Pinging...' : 'Wake 29-bit (0x18DB)'}
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Live Telemetry (When Active) */}
             {activeTransportId === 'arduino-nano-gvret' && hardwareStatus?.extendedTelemetry && (
               <div className="my-2 p-2 bg-slate-900/80 rounded border border-indigo-500/30 space-y-1 text-[10px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Operating Mode:</span>
+                  <span className={`font-bold ${(hardwareStatus.extendedTelemetry as any).listenOnly ? 'text-amber-400' : 'text-emerald-400'}`}>
+                    {(hardwareStatus.extendedTelemetry as any).operatingMode || ((hardwareStatus.extendedTelemetry as any).listenOnly ? 'LISTEN ONLY (SILENT)' : 'NORMAL (ACKs ENABLED)')}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Bus Speed:</span>
+                  <span className="text-sky-300 font-mono font-bold">
+                    {(hardwareStatus.extendedTelemetry as any).busSpeed || '500 kbps'}
+                  </span>
+                </div>
                 <div className="flex justify-between">
                   <span className="text-slate-400">Keepalive State:</span>
                   <span className={`font-bold ${(hardwareStatus.extendedTelemetry as any).isKeepaliveValidated ? 'text-emerald-400' : 'text-amber-400'}`}>
@@ -1464,7 +1563,7 @@ export const HardwareManagerPage: React.FC = () => {
                 <div className="flex justify-between">
                   <span className="text-slate-400">Firmware Build:</span>
                   <span className="text-slate-200 font-mono">
-                    Build {(hardwareStatus.extendedTelemetry as any).firmwareBuild || '500'}
+                    Build {(hardwareStatus.extendedTelemetry as any).firmwareBuild || '333'}
                   </span>
                 </div>
                 <div className="flex justify-between">

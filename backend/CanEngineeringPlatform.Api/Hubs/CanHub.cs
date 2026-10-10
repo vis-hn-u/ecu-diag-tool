@@ -28,17 +28,20 @@ public class CanHub : Hub<ICanHubClient>
     private readonly ICanReplayService _replayService;
     private readonly IDiagnosticSessionService _diagnosticService;
     private readonly CanEngineeringPlatform.Core.Hardware.IHardwareManager _hardwareManager;
+    private readonly ICanPipeline _pipeline;
 
     public CanHub(
         ITopologyEngine topologyEngine,
         ICanReplayService replayService,
         IDiagnosticSessionService diagnosticService,
-        CanEngineeringPlatform.Core.Hardware.IHardwareManager hardwareManager)
+        CanEngineeringPlatform.Core.Hardware.IHardwareManager hardwareManager,
+        ICanPipeline pipeline)
     {
         _topologyEngine = topologyEngine;
         _replayService = replayService;
         _diagnosticService = diagnosticService;
         _hardwareManager = hardwareManager;
+        _pipeline = pipeline;
     }
 
     public async Task RequestInitialState()
@@ -51,6 +54,16 @@ public class CanHub : Hub<ICanHubClient>
         if (hwStatus != null)
         {
             await Clients.Caller.ReceiveHardwareStatus(hwStatus);
+        }
+
+        var recent = _pipeline.GetRecentFrames(200);
+        if (recent.Count > 0)
+        {
+            await Clients.Caller.ReceiveFrameBatch(new CanFrameBatch
+            {
+                Frames = System.Linq.Enumerable.ToList(recent),
+                FrameRate = _pipeline.CurrentFps
+            });
         }
     }
 }

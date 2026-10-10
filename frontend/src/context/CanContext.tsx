@@ -204,7 +204,27 @@ export const CanProvider: React.FC<{ children: ReactNode }> = ({ children }) => 
 
       if (isStreamingRef.current && batch.frames.length > 0) {
         setFrames(prev => {
-          const next = [...prev, ...batch.frames];
+          const normalized = batch.frames.map(f => {
+            let dataArr: number[] = [];
+            if (Array.isArray(f.data)) {
+              dataArr = f.data;
+            } else if (typeof (f as any).data === 'string') {
+              try {
+                const bin = atob((f as any).data);
+                dataArr = Array.from(bin, c => c.charCodeAt(0));
+              } catch {
+                dataArr = [];
+              }
+            }
+            return {
+              ...f,
+              data: dataArr,
+              isExtended: f.isExtended ?? ((f.flags & 1) !== 0),
+              isRtr: f.isRtr ?? ((f.flags & 2) !== 0),
+              isCanFd: f.isCanFd ?? ((f.flags & 4) !== 0)
+            };
+          });
+          const next = [...prev, ...normalized];
           return next.length > MAX_FRAMES ? next.slice(next.length - MAX_FRAMES) : next;
         });
       }

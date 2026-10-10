@@ -26,6 +26,18 @@ public class DiagnosticTroubleCode
     public string Description { get; set; } = string.Empty;
     public string EcuName { get; set; } = string.Empty;
     public uint CanId { get; set; }
+    public uint RequestCanId { get; set; } = 0x7E0;
+    public uint ResponseCanId => CanId != 0 ? CanId : 0x7E8;
+    public string EcuAddress { get; set; } = string.Empty;
+    public string Protocol { get; set; } = "UDS";
+    public byte Service { get; set; } = 0x19;
+    public byte? Subfunction { get; set; } = 0x02;
+    public string DecodedStatus => string.Join(" | ", ActiveStatusFlags);
+    public string RawDtcBytesHex { get; set; } = string.Empty;
+    public string RawCompleteResponseHex { get; set; } = string.Empty;
+    public string SourceDatabase { get; set; } = "SAE J2012 Standard Database";
+    public string Confidence { get; set; } = "CONFIRMED";
+    public int? OccurrenceCount { get; set; }
     public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
 
     // Status helpers
@@ -37,7 +49,9 @@ public class DiagnosticTroubleCode
     public bool IsFailedSinceClear => (StatusByte & 0x20) != 0;
     public bool IsTestNotCompleted => (StatusByte & 0x10) != 0 || (StatusByte & 0x40) != 0;
 
-    public string RawEvidenceHex => $"DTC:0x{RawDtcNumber:X6} Status:0x{StatusByte:X2} (CAN:0x{CanId:X3})";
+    public string RawEvidenceHex => !string.IsNullOrEmpty(RawCompleteResponseHex) 
+        ? RawCompleteResponseHex 
+        : $"DTC:0x{RawDtcNumber:X6} Status:0x{StatusByte:X2} (CAN:0x{CanId:X3})";
 
     public List<string> ActiveStatusFlags
     {

@@ -432,49 +432,72 @@ public class LiveDataService : ILiveDataService
         return sample;
     }
 
+    private readonly object _pollingLock = new();
+
     public void StartPolling(uint requestCanId, IEnumerable<string> parameterIds, int intervalMs = 250, string ecuName = "ECM")
     {
-        StopPolling();
-
-        var paramList = parameterIds.Where(id => _definitions.ContainsKey(id)).ToList();
-        if (paramList.Count == 0) paramList = _definitions.Keys.Take(6).ToList();
-
-        _pollingCts = new CancellationTokenSource();
-        var token = _pollingCts.Token;
-
-        _pollingTask = Task.Run(async () =>
+        lock (_pollingLock)
         {
-            while (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    foreach (var pId in paramList)
-                    {
-                        if (token.IsCancellationRequested) break;
-                        await PollParameterAsync(requestCanId, pId, ecuName, token);
-                        await Task.Delay(25, token); // Inter-poll delay
-                    }
+            StopPollingInternal();
 
-                    await Task.Delay(intervalMs, token);
-                }
-                catch (OperationCanceledException)
+            var paramList = parameterIds.Where(id => _definitions.ContainsKey(id)).ToList();
+            if (paramList.Count == 0) paramList = _definitions.Keys.Take(6).ToList();
+
+            _pollingCts = new CancellationTokenSource();
+            var token = _pollingCts.Token;
+
+            _pollingTask = Task.Run(async () =>
+            {
+                while (!token.IsCancellationRequested)
                 {
-                    break;
+                    try
+                    {
+                        foreach (var pId in paramList)
+                        {
+                            if (token.IsCancellationRequested) break;
+                            await PollParameterAsync(requestCanId, pId, ecuName, token);
+                            await Task.Delay(25, token); // Inter-poll delay
+                        }
+
+                        await Task.Delay(intervalMs, token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+                    catch
+                    {
+                        await Task.Delay(500, token);
+                    }
                 }
-                catch
-                {
-                    await Task.Delay(500, token);
-                }
-            }
-        }, token);
+            }, token);
+        }
     }
 
     public void StopPolling()
     {
+        lock (_pollingLock)
+        {
+            StopPollingInternal();
+        }
+    }
+
+    private void StopPollingInternal()
+    {
         if (_pollingCts != null)
         {
-            _pollingCts.Cancel();
-            _pollingCts.Dispose();
+            try
+            {
+                _pollingCts.Cancel();
+            }
+            catch (ObjectDisposedException) { }
+
+            try
+            {
+                _pollingCts.Dispose();
+            }
+            catch (ObjectDisposedException) { }
+
             _pollingCts = null;
         }
         _pollingTask = null;

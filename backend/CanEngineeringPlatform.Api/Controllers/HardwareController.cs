@@ -37,7 +37,19 @@ public class ConfigureTransportRequest
 
 public class GvretListenOnlyRequest
 {
-    public bool ListenOnly { get; set; } = true;
+    public bool ListenOnly { get; set; } = false;
+}
+
+public class GvretBitrateRequest
+{
+    public uint Bitrate { get; set; } = 500000u;
+}
+
+public class BenchPingRequest
+{
+    public uint? Id { get; set; }
+    public bool? IsExtended { get; set; }
+    public int[]? Data { get; set; }
 }
 
 public class ElmCommandRequest
@@ -129,6 +141,61 @@ public class HardwareController : ControllerBase
 
         gvret.SetListenOnly(request.ListenOnly);
         return Ok(gvret.GetStatus());
+    }
+
+    [HttpPost("gvret/bitrate")]
+    public ActionResult SetGvretBitrate([FromBody] GvretBitrateRequest request)
+    {
+        var transport = _hardwareManager.GetTransport(CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.TransportIdentifier)
+                     ?? _hardwareManager.GetAllTransports().FirstOrDefault(t => t is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport);
+
+        if (transport is not CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
+        {
+            return NotFound("GVRET transport is not registered");
+        }
+
+        gvret.Configure(gvret.ConnectionDetails ?? "COM8", request.Bitrate, gvret.IsListenOnly, 1000000);
+        return Ok(gvret.GetStatus());
+    }
+
+    [HttpPost("gvret/bench-ping")]
+    public async Task<IActionResult> SendBenchPing([FromBody] BenchPingRequest? request)
+    {
+        var transport = _hardwareManager.GetTransport(CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport.TransportIdentifier)
+                     ?? _hardwareManager.GetAllTransports().FirstOrDefault(t => t is CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport);
+
+        if (transport is not CanEngineeringPlatform.Core.Hardware.Transports.GvretSerialTransport gvret)
+        {
+            return NotFound("GVRET transport is not registered");
+        }
+
+        if (!gvret.GetStatus().IsConnected)
+        {
+            return BadRequest("GVRET transport is not connected");
+        }
+
+        if (gvret.IsListenOnly)
+        {
+            gvret.SetListenOnly(false);
+        }
+
+        bool extended = request?.IsExtended ?? false;
+        uint id = request?.Id ?? (extended ? 0x18DB33F1u : 0x7DFu);
+        byte[] payload = request?.Data != null
+            ? request.Data.Select(x => (byte)x).ToArray()
+            : new byte[] { 0x02, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+
+        var frame = CanFrame.CreateClassic(
+            id: id,
+            data: payload,
+            isExtended: extended,
+            channel: 0,
+            sourceId: "BenchPing",
+            direction: CanDirection.Tx
+        );
+
+        bool sent = await gvret.SendFrameAsync(frame);
+        return Ok(new { success = sent, id = $"0x{id:X}", isExtended = extended, frame = frame.ToHexString() });
     }
 
     [HttpPost("elm327/command")]
@@ -244,7 +311,7 @@ public class HardwareController : ControllerBase
         {
             uint speed = request.NominalBaudRate.GetValueOrDefault(500000u);
             int uartBaud = request.SerialBaudRate.GetValueOrDefault(1000000);
-            bool listen = request.ListenOnly.GetValueOrDefault(true);
+            bool listen = request.ListenOnly.GetValueOrDefault(false);
             gvret.Configure(request.PortName ?? "COM8", speed, listen, uartBaud);
         }
 
@@ -256,7 +323,9 @@ public class HardwareController : ControllerBase
     {
         string gvretPort = request?.PortName ?? "COM8";
         string espPort = "COM14";
-        bool ok = await _hardwareManager.EnableDualHardwareStreamingAsync(gvretPort, espPort);
+        uint speed = request?.NominalBaudRate.GetValueOrDefault(500000u) ?? 500000u;
+        bool listen = request?.ListenOnly.GetValueOrDefault(false) ?? false;
+        bool ok = await _hardwareManager.EnableDualHardwareStreamingAsync(gvretPort, espPort, speed, listen);
         return Ok(new { success = ok, connectedTransports = _hardwareManager.GetConnectedTransports().Select(t => t.GetStatus()) });
     }
 

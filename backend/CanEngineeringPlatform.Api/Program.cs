@@ -19,10 +19,12 @@ using CanEngineeringPlatform.Core.Logging;
 using CanEngineeringPlatform.Core.Pipeline;
 using CanEngineeringPlatform.Core.Replay;
 using CanEngineeringPlatform.Core.Sessions;
+using CanEngineeringPlatform.Core.Signals;
 using CanEngineeringPlatform.Core.Signals.Calculated;
 using CanEngineeringPlatform.Core.Topology;
 using CanEngineeringPlatform.Core.Analysis.Comparison;
 using CanEngineeringPlatform.Core.Analysis.Import;
+using CanEngineeringPlatform.Core.Analysis.OperatingEnvelope;
 using CanEngineeringPlatform.Core.Analysis.Processing;
 using CanEngineeringPlatform.Core.Analysis.Validation;
 using CanEngineeringPlatform.Core.Vehicles;
@@ -86,6 +88,8 @@ builder.Services.AddCors(options =>
 });
 
 // Register Core CAN Services (Singletons)
+builder.Services.AddSingleton<IUnifiedSignalRegistry, UnifiedSignalRegistry>();
+builder.Services.AddSingleton<ILiveOperatingGridService, LiveOperatingGridService>();
 builder.Services.AddSingleton<ITopologyEngine, TopologyEngine>();
 builder.Services.AddSingleton<ICanLoggerService, CanLoggerService>();
 builder.Services.AddSingleton<ICanPipeline, CanPipeline>();

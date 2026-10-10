@@ -9,6 +9,7 @@ using CanEngineeringPlatform.Core.Calibration;
 using CanEngineeringPlatform.Core.Dashboard;
 using CanEngineeringPlatform.Core.Diagnostics.Dtc;
 using CanEngineeringPlatform.Core.Diagnostics.FreezeFrame;
+using CanEngineeringPlatform.Core.Diagnostics.IsoTp;
 using CanEngineeringPlatform.Core.Diagnostics.Manufacturer;
 using CanEngineeringPlatform.Core.Diagnostics.Transport;
 using CanEngineeringPlatform.Core.Diagnostics.Vag;
@@ -368,5 +369,81 @@ public class DiagnosticsExtendedTests
         Assert.NotNull(railMap);
         Assert.Equal(MapCategory.Fuel, railMap.Category);
         Assert.Equal("bar", railMap.ZUnit);
+    }
+
+    [Fact]
+    public void Kwp2000_Parse0x58_MahindraTharBoschEdc16_DecodesAll10Faults()
+    {
+        // 32-byte payload from Bosch EDC16C39: SID 0x58, Count 10, followed by 10 DTCs with status byte
+        byte[] payload = new byte[]
+        {
+            0x58, 0x0A,
+            0x11, 0x20, 0x24, // P1120
+            0x02, 0x23, 0x24, // P0223
+            0x01, 0x83, 0x24, // P0183
+            0x01, 0x13, 0x24, // P0113
+            0x15, 0x32, 0x24, // P1532
+            0x01, 0x02, 0x24, // P0102
+            0x18, 0x32, 0x24, // P1832
+            0x17, 0x92, 0x24, // P1792
+            0x11, 0x90, 0x24, // P1190
+            0x03, 0x41, 0x24  // P0341
+        };
+
+        var dtcs = DtcDecoder.ParseKwp0x58or0x53Response(payload, "ECM", 0x7E8);
+
+        Assert.Equal(10, dtcs.Count);
+        var codes = dtcs.Select(d => d.Code).ToList();
+        Assert.Contains("P1120", codes);
+        Assert.Contains("P0223", codes);
+        Assert.Contains("P0183", codes);
+        Assert.Contains("P0113", codes);
+        Assert.Contains("P1532", codes);
+        Assert.Contains("P0102", codes);
+        Assert.Contains("P1832", codes);
+        Assert.Contains("P1792", codes);
+        Assert.Contains("P1190", codes);
+        Assert.Contains("P0341", codes);
+
+        // Verify descriptions were mapped from dictionary
+        var p1120 = dtcs.First(d => d.Code == "P1120");
+        Assert.Contains("ACCEL PEDAL", p1120.Description);
+
+        var p0223 = dtcs.First(d => d.Code == "P0223");
+        Assert.Contains("APP SENSOR 2", p0223.Description);
+    }
+
+    [Fact]
+    public void IsoTpRouter_FlowControlRequiredEvent_TriggersAndPropagates()
+    {
+        var router = new IsoTpRouter();
+        CanFrame? generatedFc = null;
+        router.OnFlowControlRequired += fc => generatedFc = fc;
+
+        // Simulate incoming First Frame on 0x7E8 (ECM response, length 20)
+        byte[] ffData = new byte[] { 0x10, 0x14, 0x58, 0x0A, 0x11, 0x20, 0x02, 0x23 };
+        var ff = new CanFrame(1000, 0x7E8, 8, 0, ffData);
+
+        bool completed = router.RouteCanFrame(ff, out _);
+
+        Assert.False(completed);
+        Assert.NotNull(generatedFc);
+        Assert.Equal((uint)0x7E0, generatedFc.Value.Id); // Flow control must target 0x7E0
+        Assert.Equal(8, generatedFc.Value.Dlc);
+        Assert.Equal(0x30, generatedFc.Value.Data[0]); // PCI 0x30 (Flow Control: CTS)
+    }
+
+    [Fact]
+    public void ObdDecoder_Mode03_WithDtcCountPrefix_DecodesAccurately()
+    {
+        // 0x43 followed by count byte 0x02 and two DTCs: P0102 (0x01, 0x02) and P0113 (0x01, 0x13)
+        byte[] payload = new byte[] { 0x43, 0x02, 0x01, 0x02, 0x01, 0x13 };
+
+        var resp = CanEngineeringPlatform.Core.Diagnostics.Obd.ObdDecoder.ParseResponse(payload);
+
+        Assert.True(resp.IsPositive);
+        Assert.Equal(2, resp.DtcCodes.Count);
+        Assert.Equal("P0102", resp.DtcCodes[0]);
+        Assert.Equal("P0113", resp.DtcCodes[1]);
     }
 }

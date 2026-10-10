@@ -281,7 +281,8 @@ public class EcuSimulator : IEcuSimulator
 
             case ObdMode.StoredDTCs:
             case ObdMode.PendingDTCs:
-                // Response: 0x43 <DTC1_H> <DTC1_L> ...
+            case ObdMode.PermanentDTCs:
+                // Response: 0x43/0x47/0x4A <DTC1_H> <DTC1_L> ...
                 var dtcBytes = new List<byte> { (byte)(0x40 + (byte)mode) };
                 foreach (var dtc in ecu.TroubleCodes)
                 {

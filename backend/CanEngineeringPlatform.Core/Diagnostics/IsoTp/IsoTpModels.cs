@@ -55,6 +55,6 @@ public class IsoTpMessage
 public class IsoTpConfig
 {
     public byte BlockSize { get; set; } = 0; // 0 = send all without FC
-    public byte SeparationTimeMin { get; set; } = 10; // STmin in ms (0-127 ms or 0xF1-0xF9 for 100-900us)
+    public byte SeparationTimeMin { get; set; } = 0; // STmin in ms (0 = full speed, standard for EDC16 / UDS)
     public int TimeoutMs { get; set; } = 1000; // 1 second timeout
 }
