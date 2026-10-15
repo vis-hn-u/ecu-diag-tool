@@ -56,6 +56,19 @@ public class RoadDynoEngine
         // 1. Smooth speed and RPM arrays synchronously
         var smoothedSpeedsKmh = SmoothSeries(samples.Select(s => s.GpsSpeedKmh).ToList(), smoothingWindow);
         var smoothedRpms = SmoothSeries(samples.Select(s => s.EngineRpm).ToList(), smoothingWindow);
+
+        // Universal Bench/Dyno Telemetry Kinematics:
+        // When an ECU is tested on a desk bench or roller dyno where ABS/wheel speed sensors are absent,
+        // derive wheel speed directly from Engine RPM, gear ratio, final drive, and tire circumference.
+        if (smoothedSpeedsKmh.All(v => v < 1.0) && smoothedRpms.Any(r => r > 400.0) && totalGearRatio > 0 && tireCircumference > 0)
+        {
+            for (int i = 0; i < samples.Count; i++)
+            {
+                double wheelRps = smoothedRpms[i] / (totalGearRatio * 60.0);
+                smoothedSpeedsKmh[i] = wheelRps * tireCircumference * 3.6;
+            }
+        }
+
         var dataPoints = new List<RoadDynoDataPoint>();
 
         for (int i = 0; i < samples.Count; i++)

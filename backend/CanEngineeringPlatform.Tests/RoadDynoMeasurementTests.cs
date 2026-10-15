@@ -95,6 +95,36 @@ public class RoadDynoMeasurementTests
         Assert.Equal(midPt.ForceTotalN, midPt.ForceInertialN + midPt.ForceAeroN + midPt.ForceRollingN + midPt.ForceSlopeN, 1);
     }
 
+    [Fact]
+    public void RoadDyno_WhenVehicleSpeedIsZeroOrMissing_DerivesSpeedFromRpm()
+    {
+        var vehicle = CreateTestVehicle();
+        var ambient = new AmbientConditions();
+
+        // Create samples with 0 km/h (bench test where ECU only outputs RPM)
+        var samples = new List<RoadDynoSample>();
+        for (int i = 0; i <= 40; i++)
+        {
+            double tMs = i * 100.0;
+            double rpm = 2000.0 + (4500.0 * (i / 40.0));
+            samples.Add(new RoadDynoSample
+            {
+                TimestampMs = tMs,
+                GpsSpeedKmh = 0.0, // ABS speed unavailable on bench
+                EngineRpm = rpm,
+                ThrottlePosition = 100.0
+            });
+        }
+
+        var run = _engine.CalculateRoadDynoRun(samples, vehicle, 3, ambient, AtmosphericStandard.SAE_J1349);
+
+        Assert.NotNull(run);
+        Assert.NotEmpty(run.Points);
+        Assert.True(run.PeakWheelPowerHp > 50.0, "Wheel power should be computed via kinematics even with 0 GPS speed");
+        Assert.True(run.PeakEnginePowerHp > run.PeakWheelPowerHp, "Crank power should exceed wheel power");
+        Assert.True(run.Points.Last().SpeedKmh > 50.0, "End speed should be derived from gear ratio and RPM");
+    }
+
     // ==========================================
     // 2. Atmospheric Correction Standards Tests
     // ==========================================

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { api, downloadBlobAsFile } from '../services/api';
 import { 
   DynoPullSummary, 
@@ -228,9 +228,9 @@ export const DynoPage: React.FC = () => {
     return null;
   };
 
-  const liveCanRpm = getLiveVal(['rpm', 'engspd', 'eng_spd', 'drehzahl', 'cr_ems_engspd', 'mo_drehzahl', 'enginespeed']);
-  const liveCanSpeed = getLiveVal(['vehspd', 'veh_spd', 'vehiclespeed', 'geschw', 'v_fzg', 'speed_vehicle', 'speed']);
-  const liveCanThrottle = getLiveVal(['throttle', 'pedal', 'accel', 'gaspedal', 'app', 'throttlepos', 'gas_pedal']);
+  const liveCanRpm = getLiveVal(['rpm', 'engspd', 'eng_spd', 'drehzahl', 'cr_ems_engspd', 'mo_drehzahl', 'enginespeed', 'motordrehzahl', 'engine_speed', '010c', 'pid_0c', 'pid0c']);
+  const liveCanSpeed = getLiveVal(['vehspd', 'veh_spd', 'vehiclespeed', 'geschw', 'v_fzg', 'speed_vehicle', 'speed', '010d', 'pid_0d', 'pid0d', 'vss', 'wheelspeed', 'radgeschw']);
+  const liveCanThrottle = getLiveVal(['throttle', 'pedal', 'accel', 'gaspedal', 'app', 'throttlepos', 'gas_pedal', '0111', 'pid_11', 'pid11', '0149', 'pid_49', 'fahrpedal']);
 
   // Road Dyno Mode State
   const [vehicleProfiles, setVehicleProfiles] = useState<VehicleProfile[]>(FALLBACK_VEHICLES);
@@ -272,6 +272,22 @@ export const DynoPage: React.FC = () => {
   const [unitMode, setUnitMode] = useState<'Metric' | 'Imperial'>('Imperial');
   const [showCorrected, setShowCorrected] = useState<boolean>(true);
   const [showWheelPower, setShowWheelPower] = useState<boolean>(true);
+
+  // Bench / Chassis Dyno Mode: Derive Wheel Speed from CAN Engine RPM
+  const [benchDynoMode, setBenchDynoMode] = useState<boolean>(true);
+
+  const derivedBenchSpeed = useMemo(() => {
+    if (!liveCanRpm || !selectedVehicle) return null;
+    const gRatio = selectedVehicle.transmission?.gearRatios?.[selectedGear - 1] || 1.457;
+    const totalRatio = gRatio * (selectedVehicle.transmission?.finalDriveRatio || 3.944);
+    const circ = selectedVehicle.tires?.circumferenceMeters || 2.02;
+    const wheelRps = liveCanRpm / (totalRatio * 60.0);
+    return Math.round(wheelRps * circ * 3.6 * 10.0) / 10.0;
+  }, [liveCanRpm, selectedVehicle, selectedGear]);
+
+  const effectiveSpeed = (liveCanSpeed !== null && liveCanSpeed > 1) 
+    ? liveCanSpeed 
+    : (benchDynoMode ? derivedBenchSpeed : null);
 
   // Comparison State
   const [comparisonResult, setComparisonResult] = useState<DynoRunComparisonResult | null>(null);
@@ -401,10 +417,10 @@ export const DynoPage: React.FC = () => {
 
   const handleArmTrigger = () => {
     setRejectionReason(null);
-    if (liveCanRpm === null || liveCanSpeed === null) {
+    if (liveCanRpm === null || effectiveSpeed === null) {
       setAcquisitionState('REJECTED');
       setRejectionReason(
-        'CAN LIVE DATA UNAVAILABLE: Real Road Dyno acquisition requires live Engine RPM and Vehicle Speed decoded from the vehicle CAN bus. Connect vehicle hardware or switch to the Engine Simulator tab.'
+        'CAN LIVE DATA UNAVAILABLE: Dyno acquisition requires live Engine RPM decoded from CANH / CANL. Connect your vehicle or bench ECU to the CAN bus.'
       );
       return;
     }
@@ -426,17 +442,17 @@ export const DynoPage: React.FC = () => {
       const now = Date.now();
 
       // Enforce live data presence - NEVER synthesize fake data in RoadDyno mode
-      if (liveCanRpm === null || liveCanSpeed === null) {
+      if (liveCanRpm === null || effectiveSpeed === null) {
         if (acquisitionState === 'MEASURING' || acquisitionState === 'RUN_DETECTED') {
           setAcquisitionState('REJECTED');
-          setRejectionReason('CAN SIGNAL LOSS: Engine RPM or Vehicle Speed dropped out during dyno pull.');
+          setRejectionReason('CAN SIGNAL LOSS: Engine RPM or Speed dropped out during dyno pull.');
         }
         return;
       }
 
       const throttle = liveCanThrottle ?? 100.0;
       const rpm = liveCanRpm;
-      const speed = liveCanSpeed;
+      const speed = effectiveSpeed;
 
       // 1. ARMED: Waiting for trigger
       if (acquisitionState === 'ARMED') {
@@ -502,7 +518,7 @@ export const DynoPage: React.FC = () => {
     }, 100);
 
     return () => clearInterval(interval);
-  }, [acquisitionState, liveCanRpm, liveCanSpeed, liveCanThrottle, selectedVehicle, lossModel]);
+  }, [acquisitionState, liveCanRpm, effectiveSpeed, liveCanThrottle, selectedVehicle, lossModel]);
 
   // Finish and compute dyno curve from recorded samples
   const finishLiveAcquisition = async () => {
@@ -891,7 +907,7 @@ export const DynoPage: React.FC = () => {
                 HARDWARE REQUIRED
               </span>
               <span>
-                Road dyno requires physical vehicle CAN bus signals ({liveCanRpm ? `${Math.round(liveCanRpm)} RPM` : 'RPM: UNAVAILABLE'}, {liveCanSpeed ? `${liveCanSpeed.toFixed(1)} km/h` : 'Speed: UNAVAILABLE'}).
+                Road & Bench Dyno Telemetry ({liveCanRpm ? `${Math.round(liveCanRpm)} RPM` : 'RPM: UNAVAILABLE'}, {effectiveSpeed !== null ? `${effectiveSpeed.toFixed(1)} km/h ${liveCanSpeed !== null ? '(CAN ABS)' : '(Bench Kinematics)'}` : 'Speed: UNAVAILABLE'}).
               </span>
             </>
           )}
@@ -965,6 +981,23 @@ export const DynoPage: React.FC = () => {
                   <option value="Empirical">Empirical {selectedVehicle?.drivetrainType || 'AWD'} ({selectedVehicle?.drivetrainLossPct || 16}%)</option>
                   <option value="CoastDown">Coast-Down Deceleration Loss</option>
                 </select>
+              </div>
+
+              {/* Bench Speed Kinematics Toggle */}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-0.5">SPEED SOURCE</label>
+                <button
+                  type="button"
+                  onClick={() => setBenchDynoMode(!benchDynoMode)}
+                  className={`px-2.5 py-1 rounded text-xs font-bold border transition-all ${
+                    benchDynoMode 
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50' 
+                      : 'bg-can-bg text-slate-400 border-can-border hover:text-white'
+                  }`}
+                  title="Derives road speed from CAN RPM and gearbox ratios when testing on bench without ABS sensors"
+                >
+                  {benchDynoMode ? '⚡ Bench Kinematics' : 'Strict CAN ABS'}
+                </button>
               </div>
             </div>
 
@@ -1043,9 +1076,11 @@ export const DynoPage: React.FC = () => {
               </div>
 
               <div className="text-center px-3 py-1 bg-can-bg rounded border border-can-border">
-                <span className="text-[10px] text-slate-400 block font-sans">VEHICLE SPEED</span>
+                <span className="text-[10px] text-slate-400 block font-sans">
+                  {liveCanSpeed !== null ? 'VEHICLE SPEED (CAN)' : 'SPEED (KINEMATICS)'}
+                </span>
                 <span className="text-lg font-bold text-emerald-400">
-                  {liveCanSpeed !== null ? `${liveCanSpeed.toFixed(1)} km/h` : (totalFrames > 0 ? '0.0 km/h' : '---')}
+                  {effectiveSpeed !== null ? `${effectiveSpeed.toFixed(1)} km/h` : (totalFrames > 0 ? '0.0 km/h' : '---')}
                 </span>
               </div>
 
