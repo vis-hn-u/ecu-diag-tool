@@ -1,19 +1,24 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { api, downloadBlobAsFile } from '../services/api';
 import { EcuDefinitionPack, ReadonlyEcuMap, OperatingPointTracer } from '../types/diagnosticsExtended';
 import { useCan } from '../context/CanContext';
 import { 
   Sliders, Grid, ShieldAlert, Cpu, Layers, Eye, Activity, Rotate3d, 
   Sparkles, Compass, CheckCircle2, ChevronRight, Hash, FileText,
-  Radio, Play, Square, Gauge, Flame, Zap
+  Radio, Play, Square, Gauge, Flame, Zap, PlusCircle, Save, Table,
+  RefreshCw, Globe
 } from 'lucide-react';
 
 export const MappackViewerPage: React.FC = () => {
   const { signals, totalFrames, fps, hardwareStatus, activeTransportId } = useCan();
 
+  // Top level workspace view: Standard Catalog vs Dynamic Live 3D Builder
+  const [workspaceMode, setWorkspaceMode] = useState<'CATALOG' | 'DYNAMIC_BUILDER'>('CATALOG');
+
+  // Definition Packs State
   const [packs, setPacks] = useState<EcuDefinitionPack[]>([]);
-  const [selectedPackId, setSelectedPackId] = useState<string>('edc17c55_c04_c63');
-  const [selectedMapId, setSelectedMapId] = useState<string>('EDC17_DriverWish');
+  const [selectedPackId, setSelectedPackId] = useState<string>('universal_obd2_powertrain');
+  const [selectedMapId, setSelectedMapId] = useState<string>('OBD2_SparkAdvance_Load');
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [viewMode, setViewMode] = useState<'2D' | '3D'>('2D');
   const [isExportingPdf, setIsExportingPdf] = useState(false);
@@ -30,7 +35,36 @@ export const MappackViewerPage: React.FC = () => {
   const [simRpm, setSimRpm] = useState<number>(2400);
   const [simLoad, setSimLoad] = useState<number>(50.0);
 
-  // Extract live numerical values matching candidate keywords from CAN bus
+  // Dynamic Live 3D Table Builder State (Universal for ANY ECU & signals)
+  const availableSignalNames = useMemo(() => {
+    const keys = Object.keys(signals);
+    if (keys.length === 0) {
+      return ['EngineSpeed', 'VehicleSpeed', 'ThrottlePosition', 'ManifoldPressure', 'FuelRailPressure', 'EngineTorque', 'CoolantTemp', 'MassAirFlow'];
+    }
+    return keys;
+  }, [signals]);
+
+  const [dynXSignal, setDynXSignal] = useState<string>('EngineSpeed');
+  const [dynYSignal, setDynYSignal] = useState<string>('ThrottlePosition');
+  const [dynZSignal, setDynZSignal] = useState<string>('ManifoldPressure');
+  const [dynTableName, setDynTableName] = useState<string>('Live Dynamic Powertrain Surface');
+  const [dynCategory, setDynCategory] = useState<string>('Boost');
+  const [dynCellAccumulator, setDynCellAccumulator] = useState<number[][]>(() => {
+    // 8 rows x 8 cols grid initialized with sensible physical defaults
+    const g: number[][] = [];
+    for (let r = 0; r < 8; r++) {
+      const row: number[] = [];
+      for (let c = 0; c < 8; c++) {
+        row.push(Math.round(1000 + (r * 150) + (c * 30)));
+      }
+      g.push(row);
+    }
+    return g;
+  });
+  const [isSavingCustomPack, setIsSavingCustomPack] = useState(false);
+  const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+
+  // Helper to extract live numerical values matching candidate keywords from CAN bus
   const getLiveVal = (candidates: string[]): number | null => {
     for (const [key, sig] of Object.entries(signals)) {
       const k = key.toLowerCase();
@@ -53,7 +87,7 @@ export const MappackViewerPage: React.FC = () => {
   const liveCanInjectedQty = getLiveVal(['injected', 'injection', 'iq', 'fuelqty', 'kraftstoff', 'fuelrate']);
 
   // Fetch packs on mount
-  useEffect(() => {
+  const refreshPacks = () => {
     api.getMappacks().then(pList => {
       setPacks(pList);
       if (pList.length > 0 && !pList.some(p => p.id === selectedPackId)) {
@@ -63,6 +97,10 @@ export const MappackViewerPage: React.FC = () => {
         }
       }
     }).catch(() => {});
+  };
+
+  useEffect(() => {
+    refreshPacks();
   }, []);
 
   const activePack = packs.find(p => p.id === selectedPackId) || packs[0];
@@ -125,9 +163,9 @@ export const MappackViewerPage: React.FC = () => {
     }
 
     // LIVE_CAN mode: Map accurately to physical CAN signals
-    if (yName.includes('pedal') || (yName.includes('%') && yName.includes('position'))) {
+    if (yName.includes('pedal') || (yName.includes('%') && (yName.includes('position') || yName.includes('throttle')))) {
       const val = liveCanThrottle ?? 0.0;
-      return { value: val, label: 'Pedal (CAN)', unit: '%' };
+      return { value: val, label: 'Pedal / Throttle (CAN)', unit: '%' };
     }
 
     if (yName.includes('rail') || yName.includes('bar')) {
@@ -137,12 +175,12 @@ export const MappackViewerPage: React.FC = () => {
 
     if (yName.includes('boost') || yName.includes('mbar') || yName.includes('map') || yName.includes('charge')) {
       const val = liveCanBoostPressure ?? 1013.0;
-      return { value: val, label: 'Boost Pressure (CAN)', unit: 'mbar' };
+      return { value: val, label: 'Boost / MAP (CAN)', unit: 'mbar' };
     }
 
-    if (yName.includes('air mass') || yName.includes('mg/hub') || yName.includes('maf')) {
+    if (yName.includes('air mass') || yName.includes('mg/hub') || yName.includes('maf') || yName.includes('g/s')) {
       const val = liveCanAirMass ?? 480.0;
-      return { value: val, label: 'MAF Air Mass (CAN)', unit: 'mg/hub' };
+      return { value: val, label: 'Air Mass (CAN)', unit: activeMap.yAxis.unit || 'mg/hub' };
     }
 
     if (yName.includes('mm³') || yName.includes('iq') || yName.includes('injected')) {
@@ -267,6 +305,120 @@ export const MappackViewerPage: React.FC = () => {
     };
   }, [activeMap, currentRpm, currentYData]);
 
+  // Dynamic Live Table Breakpoints (8 x 8)
+  const dynXBreakpoints = useMemo(() => {
+    const sig = signals[dynXSignal] as any;
+    const minVal = sig?.minimum !== undefined && sig?.maximum !== undefined && sig.minimum < sig.maximum ? sig.minimum : 800;
+    const maxVal = sig?.maximum !== undefined && sig.maximum > minVal ? sig.maximum : 6000;
+    const arr: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      arr.push(Math.round(minVal + (i / 7) * (maxVal - minVal)));
+    }
+    return arr;
+  }, [signals, dynXSignal]);
+
+  const dynYBreakpoints = useMemo(() => {
+    const sig = signals[dynYSignal] as any;
+    const minVal = sig?.minimum !== undefined && sig?.maximum !== undefined && sig.minimum < sig.maximum ? sig.minimum : 0;
+    const maxVal = sig?.maximum !== undefined && sig.maximum > minVal ? sig.maximum : 100;
+    const arr: number[] = [];
+    for (let i = 0; i < 8; i++) {
+      arr.push(Math.round(minVal + (i / 7) * (maxVal - minVal)));
+    }
+    return arr;
+  }, [signals, dynYSignal]);
+
+  // Live Accumulator into dynamic cell grid as CAN frames arrive
+  useEffect(() => {
+    if (workspaceMode !== 'DYNAMIC_BUILDER') return;
+    const xVal = signals[dynXSignal]?.engineeringValue ?? liveCanRpm ?? currentRpm;
+    const yVal = signals[dynYSignal]?.engineeringValue ?? liveCanThrottle ?? currentYData.value;
+    const zVal = signals[dynZSignal]?.engineeringValue;
+
+    if (typeof zVal !== 'number') return;
+
+    // Find nearest cell in dynamic grid
+    let bx = 0;
+    let bxd = Infinity;
+    for (let i = 0; i < dynXBreakpoints.length; i++) {
+      const d = Math.abs(dynXBreakpoints[i] - xVal);
+      if (d < bxd) { bxd = d; bx = i; }
+    }
+
+    let by = 0;
+    let byd = Infinity;
+    for (let j = 0; j < dynYBreakpoints.length; j++) {
+      const d = Math.abs(dynYBreakpoints[j] - yVal);
+      if (d < byd) { byd = d; by = j; }
+    }
+
+    setDynCellAccumulator(prev => {
+      const next = prev.map(row => [...row]);
+      if (next[by] && next[by][bx] !== undefined) {
+        // Smooth exponential moving average update into active cell
+        next[by][bx] = Math.round(((next[by][bx] * 0.7) + (zVal * 0.3)) * 10) / 10;
+      }
+      return next;
+    });
+  }, [signals, workspaceMode, dynXSignal, dynYSignal, dynZSignal, dynXBreakpoints, dynYBreakpoints, currentRpm, currentYData.value]);
+
+  // Save Dynamic Table to Database
+  const handleSaveDynamicTable = async () => {
+    setIsSavingCustomPack(true);
+    setSaveSuccessMsg(null);
+    try {
+      const customPack: EcuDefinitionPack = {
+        id: `custom_${Date.now()}`,
+        name: `Custom Live: ${dynTableName}`,
+        targetPlatform: 'Universal CAN Bus Telemetry (Any Connected ECU)',
+        hardwarePartNumber: 'CUSTOM-CAN-GENERIC',
+        softwareVersion: 'LIVE-DYN-V1',
+        calibrationId: 'CUSTOM_LIVE_CORRELATION',
+        author: 'User Dynamic Table Generator',
+        version: '1.0',
+        supportedProtocols: ['CAN', 'OBD-II', 'UDS'],
+        createdAtUtc: new Date().toISOString(),
+        isReadOnly: true,
+        maps: [
+          {
+            mapId: `MAP_${Date.now()}`,
+            name: dynTableName,
+            description: `Universal Live Correlation Map (${dynXSignal} x ${dynYSignal} -> ${dynZSignal})`,
+            category: dynCategory as any,
+            dimension: 'TwoDimensional',
+            memoryAddressHex: '0xLIVE0001',
+            xAxis: {
+              name: dynXSignal,
+              unit: signals[dynXSignal]?.unit || 'Units',
+              breakpoints: dynXBreakpoints
+            },
+            yAxis: {
+              name: dynYSignal,
+              unit: signals[dynYSignal]?.unit || 'Units',
+              breakpoints: dynYBreakpoints
+            },
+            zData: dynCellAccumulator,
+            zUnit: signals[dynZSignal]?.unit || 'Units',
+            minValue: Math.min(...dynCellAccumulator.flat()),
+            maxValue: Math.max(...dynCellAccumulator.flat()),
+            decimalPrecision: 1,
+            heatmapPalette: 'turbo',
+            isReadOnly: true
+          }
+        ]
+      };
+
+      await api.addCustomMappack(customPack);
+      setSaveSuccessMsg(`Table "${dynTableName}" saved to Mappack Catalog!`);
+      refreshPacks();
+      setTimeout(() => setSaveSuccessMsg(null), 4000);
+    } catch (err: any) {
+      alert(`Failed to save table: ${err.message}`);
+    } finally {
+      setIsSavingCustomPack(false);
+    }
+  };
+
   const handleExportCalibrationPdf = async () => {
     setIsExportingPdf(true);
     try {
@@ -321,16 +473,16 @@ export const MappackViewerPage: React.FC = () => {
         <div className="flex items-center space-x-3 text-amber-300 text-xs">
           <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
           <div>
-            <span className="font-bold uppercase tracking-wider">Strictly Read-Only ECU Calibration Reference:</span>
+            <span className="font-bold uppercase tracking-wider">Universal ECU Calibration & Live Mapping Platform:</span>
             <span className="text-slate-300 ml-1.5">
-              ECU definition mappacks display verified factory & reverse-engineered table metadata with real-time CAN bus operating point tracing.
+              ECU-agnostic logic compatible with all OEM protocols (OBD-II, UDS, KWP2000, J1939) and any physical ECU on CANH/CANL.
             </span>
           </div>
         </div>
         <div className="flex items-center space-x-2">
           <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold rounded font-mono flex items-center space-x-1">
-            <Activity className="w-3.5 h-3.5 text-emerald-400" />
-            <span>BILINEAR TRACER ACTIVE</span>
+            <Globe className="w-3.5 h-3.5 text-emerald-400" />
+            <span>ALL ECUS SUPPORTED</span>
           </span>
           <div className="px-2.5 py-1 bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-bold rounded font-mono">
             READ-ONLY
@@ -338,484 +490,743 @@ export const MappackViewerPage: React.FC = () => {
         </div>
       </div>
 
-      {/* Header & Pack Selector Bar */}
-      <div className="bg-can-panel border border-can-border rounded-lg p-4 shadow flex flex-wrap items-center justify-between gap-4 font-sans">
-        <div className="flex items-center space-x-3">
-          <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400">
-            <Cpu className="w-5 h-5" />
-          </div>
-          <div>
-            <h1 className="text-lg font-bold text-white tracking-wide">ECU Definition Packs & 2D/3D Map Viewer</h1>
-            <p className="text-xs text-slate-400">
-              Hardware/Software matched calibration mappacks, 2D matrix heatmaps, and 3D surface mesh with live CAN tracing
-            </p>
-          </div>
+      {/* Primary Workspace Navigation Bar */}
+      <div className="bg-can-panel border border-can-border rounded-lg p-3 shadow-md flex flex-wrap items-center justify-between gap-3 font-sans">
+        <div className="flex items-center space-x-2">
+          <button
+            onClick={() => setWorkspaceMode('CATALOG')}
+            className={`px-3.5 py-1.5 rounded font-bold text-xs flex items-center space-x-2 transition-all ${
+              workspaceMode === 'CATALOG'
+                ? 'bg-sky-600 text-white shadow'
+                : 'bg-can-bg border border-can-border text-slate-400 hover:text-white'
+            }`}
+          >
+            <Table className="w-4 h-4" />
+            <span>Standard & OEM Mappacks</span>
+          </button>
+          <button
+            onClick={() => setWorkspaceMode('DYNAMIC_BUILDER')}
+            className={`px-3.5 py-1.5 rounded font-bold text-xs flex items-center space-x-2 transition-all ${
+              workspaceMode === 'DYNAMIC_BUILDER'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow'
+                : 'bg-can-bg border border-can-border text-slate-400 hover:text-white'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-emerald-300" />
+            <span>⚡ Universal Live 3D Table Builder (Works on ANY CAN Bus)</span>
+          </button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-xs">
-          {/* Pack Selector */}
-          <div>
-            <label className="block text-[10px] text-slate-400 font-bold mb-0.5">DEFINITION MAPPACK</label>
-            <select
-              value={selectedPackId}
-              onChange={e => {
-                setSelectedPackId(e.target.value);
-                const p = packs.find(x => x.id === e.target.value);
-                if (p && p.maps.length > 0) setSelectedMapId(p.maps[0].mapId);
-              }}
-              className="bg-can-bg border border-can-border rounded px-3 py-1.5 text-white font-bold max-w-[280px]"
-            >
-              {packs.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Tracer Acquisition Source Selector */}
-          <div>
-            <label className="block text-[10px] text-slate-400 font-bold mb-0.5">TRACER DATA SOURCE</label>
-            <div className="bg-can-bg border border-can-border rounded p-0.5 flex">
-              <button
-                onClick={() => setTracerMode('LIVE_CAN')}
-                className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
-                  tracerMode === 'LIVE_CAN' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Trace live engine point from real physical CANH / CANL bus traffic"
-              >
-                <Radio className="w-3.5 h-3.5" />
-                <span>Live CAN ({totalFrames > 0 ? `${fps} fps` : 'Waiting'})</span>
-              </button>
-              <button
-                onClick={() => setTracerMode('MANUAL_BENCH')}
-                className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
-                  tracerMode === 'MANUAL_BENCH' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Manual slider controls for testing map cells on a bench ECU"
-              >
-                <Sliders className="w-3.5 h-3.5" />
-                <span>Bench Sliders</span>
-              </button>
-              <button
-                onClick={() => setTracerMode('SIMULATION')}
-                className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
-                  tracerMode === 'SIMULATION' ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Simulated engine drift for visual demonstration"
-              >
-                <Play className="w-3.5 h-3.5" />
-                <span>Demo</span>
-              </button>
-            </div>
-          </div>
-
-          {/* 2D / 3D Mode Toggle */}
-          <div>
-            <label className="block text-[10px] text-slate-400 font-bold mb-0.5">VISUALIZATION MODE</label>
-            <div className="bg-can-bg border border-can-border rounded p-0.5 flex">
-              <button
-                onClick={() => setViewMode('2D')}
-                className={`px-3 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
-                  viewMode === '2D' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Grid className="w-3.5 h-3.5" />
-                <span>2D Matrix</span>
-              </button>
-              <button
-                onClick={() => setViewMode('3D')}
-                className={`px-3 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
-                  viewMode === '3D' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                <Rotate3d className="w-3.5 h-3.5" />
-                <span>3D Surface</span>
-              </button>
-            </div>
-          </div>
-
-          {/* PDF Report Export */}
-          <div>
-            <label className="block text-[10px] text-slate-400 font-bold mb-0.5">AUDIT REPORT</label>
-            <button
-              onClick={handleExportCalibrationPdf}
-              disabled={isExportingPdf}
-              className="px-3 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/40 rounded font-bold transition-all flex items-center space-x-1.5 shadow text-xs font-sans"
-              title="Download ECU Firmware & Calibration Analysis PDF Report"
-            >
-              <FileText className="w-3.5 h-3.5 text-sky-400" />
-              <span>{isExportingPdf ? 'Generating...' : 'Export Calibration PDF'}</span>
-            </button>
-          </div>
+        <div className="flex items-center space-x-3 text-xs">
+          <span className="text-slate-400">CAN Bus Frames: <strong className="text-emerald-400 font-mono">{totalFrames.toLocaleString()}</strong></span>
+          <span className="text-slate-400">Rate: <strong className="text-sky-400 font-mono">{fps} FPS</strong></span>
+          <span className="px-2 py-0.5 bg-slate-800 border border-slate-700 text-slate-300 rounded font-mono text-[11px]">
+            {activeTransportId || 'None'}
+          </span>
         </div>
       </div>
 
-      {/* Manual Bench Slider Scrubbers (Visible when in MANUAL_BENCH mode) */}
-      {tracerMode === 'MANUAL_BENCH' && (
-        <div className="bg-sky-950/30 border border-sky-500/40 rounded-lg p-3.5 shadow flex flex-wrap items-center justify-between gap-4 font-sans text-xs">
-          <div className="flex items-center space-x-2 text-sky-300 font-bold">
-            <Sliders className="w-4 h-4 text-sky-400" />
-            <span>BENCH MAP CALIBRATION SCRUBBERS:</span>
-            <span className="text-slate-400 font-normal">Manually sweep operating points across the table matrix</span>
-          </div>
-          <div className="flex flex-wrap items-center gap-6 font-mono">
-            <div className="flex items-center space-x-2">
-              <span className="text-[11px] text-slate-400">ENGINE RPM:</span>
-              <input
-                type="range"
-                min="600"
-                max="5000"
-                step="50"
-                value={manualRpm}
-                onChange={e => setManualRpm(Number(e.target.value))}
-                className="w-36 accent-sky-400 cursor-pointer"
-              />
-              <span className="font-bold text-white w-16 text-right">{manualRpm} RPM</span>
+      {/* =========================================================================
+          VIEW 1: STANDARD CATALOG & FACTORY MAPPACKS
+          ========================================================================= */}
+      {workspaceMode === 'CATALOG' && (
+        <div className="space-y-5">
+          {/* Header & Pack Selector Bar */}
+          <div className="bg-can-panel border border-can-border rounded-lg p-4 shadow flex flex-wrap items-center justify-between gap-4 font-sans">
+            <div className="flex items-center space-x-3">
+              <div className="p-2 bg-purple-500/10 border border-purple-500/30 rounded-lg text-purple-400">
+                <Cpu className="w-5 h-5" />
+              </div>
+              <div>
+                <h1 className="text-lg font-bold text-white tracking-wide">ECU Definition Packs & 2D/3D Map Viewer</h1>
+                <p className="text-xs text-slate-400">
+                  Universal OBD-II, Common Rail Diesel, Turbo Petrol, and OEM-specific calibration definitions with real-time CAN tracing
+                </p>
+              </div>
             </div>
-            <div className="flex items-center space-x-2">
-              <span className="text-[11px] text-slate-400">LOAD / PEDAL:</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={manualLoad}
-                onChange={e => setManualLoad(Number(e.target.value))}
-                className="w-36 accent-amber-400 cursor-pointer"
-              />
-              <span className="font-bold text-amber-300 w-14 text-right">{manualLoad}%</span>
+
+            <div className="flex flex-wrap items-center gap-3 text-xs">
+              {/* Pack Selector */}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-0.5">DEFINITION MAPPACK</label>
+                <select
+                  value={selectedPackId}
+                  onChange={e => {
+                    setSelectedPackId(e.target.value);
+                    const p = packs.find(x => x.id === e.target.value);
+                    if (p && p.maps.length > 0) setSelectedMapId(p.maps[0].mapId);
+                  }}
+                  className="bg-can-bg border border-can-border rounded px-3 py-1.5 text-white font-bold max-w-[320px]"
+                >
+                  {packs.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Tracer Acquisition Source Selector */}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-0.5">TRACER DATA SOURCE</label>
+                <div className="bg-can-bg border border-can-border rounded p-0.5 flex">
+                  <button
+                    onClick={() => setTracerMode('LIVE_CAN')}
+                    className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+                      tracerMode === 'LIVE_CAN' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Trace live engine point from real physical CANH / CANL bus traffic"
+                  >
+                    <Radio className="w-3.5 h-3.5" />
+                    <span>Live CAN ({totalFrames > 0 ? `${fps} fps` : 'Waiting'})</span>
+                  </button>
+                  <button
+                    onClick={() => setTracerMode('MANUAL_BENCH')}
+                    className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+                      tracerMode === 'MANUAL_BENCH' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Manual slider controls for testing map cells on a bench ECU"
+                  >
+                    <Sliders className="w-3.5 h-3.5" />
+                    <span>Bench Sliders</span>
+                  </button>
+                  <button
+                    onClick={() => setTracerMode('SIMULATION')}
+                    className={`px-2.5 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+                      tracerMode === 'SIMULATION' ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                    title="Simulated engine drift for visual demonstration"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>Demo</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2D / 3D Mode Toggle */}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-0.5">VISUALIZATION MODE</label>
+                <div className="bg-can-bg border border-can-border rounded p-0.5 flex">
+                  <button
+                    onClick={() => setViewMode('2D')}
+                    className={`px-3 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+                      viewMode === '2D' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Grid className="w-3.5 h-3.5" />
+                    <span>2D Matrix</span>
+                  </button>
+                  <button
+                    onClick={() => setViewMode('3D')}
+                    className={`px-3 py-1 rounded font-bold transition-all flex items-center space-x-1 ${
+                      viewMode === '3D' ? 'bg-sky-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <Rotate3d className="w-3.5 h-3.5" />
+                    <span>3D Surface</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* PDF Report Export */}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-0.5">AUDIT REPORT</label>
+                <button
+                  onClick={handleExportCalibrationPdf}
+                  disabled={isExportingPdf}
+                  className="px-3 py-1.5 bg-sky-600/20 hover:bg-sky-600/30 text-sky-300 border border-sky-500/40 rounded font-bold transition-all flex items-center space-x-1.5 shadow text-xs font-sans"
+                  title="Download ECU Firmware & Calibration Analysis PDF Report"
+                >
+                  <FileText className="w-3.5 h-3.5 text-sky-400" />
+                  <span>{isExportingPdf ? 'Generating...' : 'Export Calibration PDF'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Manual Bench Slider Scrubbers (Visible when in MANUAL_BENCH mode) */}
+          {tracerMode === 'MANUAL_BENCH' && (
+            <div className="bg-sky-950/30 border border-sky-500/40 rounded-lg p-3.5 shadow flex flex-wrap items-center justify-between gap-4 font-sans text-xs">
+              <div className="flex items-center space-x-2 text-sky-300 font-bold">
+                <Sliders className="w-4 h-4 text-sky-400" />
+                <span>BENCH MAP CALIBRATION SCRUBBERS:</span>
+                <span className="text-slate-400 font-normal">Manually sweep operating points across the table matrix</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-6 font-mono">
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] text-slate-400">ENGINE RPM:</span>
+                  <input
+                    type="range"
+                    min="600"
+                    max="5000"
+                    step="50"
+                    value={manualRpm}
+                    onChange={e => setManualRpm(Number(e.target.value))}
+                    className="w-36 accent-sky-400 cursor-pointer"
+                  />
+                  <span className="font-bold text-white w-16 text-right">{manualRpm} RPM</span>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] text-slate-400">LOAD / PEDAL:</span>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={manualLoad}
+                    onChange={e => setManualLoad(Number(e.target.value))}
+                    className="w-36 accent-amber-400 cursor-pointer"
+                  />
+                  <span className="font-bold text-amber-300 w-14 text-right">{manualLoad}%</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Main Container: Map List on Left, Map Visualization on Right */}
+          <div className="grid grid-cols-12 gap-5 items-start">
+            {/* LEFT: Map Catalog & Hardware Metadata */}
+            <div className="col-span-12 lg:col-span-4 space-y-4 font-sans">
+              {/* Pack Metadata Card */}
+              {activePack && (
+                <div className="bg-can-panel border border-can-border rounded-lg p-3.5 shadow-md space-y-2 text-xs">
+                  <div className="font-bold text-white uppercase tracking-wider flex items-center justify-between border-b border-can-border pb-2">
+                    <span>ECU IDENTIFICATION</span>
+                    <span className="text-[10px] px-1.5 py-0.5 bg-sky-950 border border-sky-800 text-sky-400 rounded font-mono">
+                      v{activePack.version}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                    <div>
+                      <span className="text-slate-500 block text-[9px] font-sans font-bold">HW PART NO</span>
+                      <span className="text-sky-300 font-bold">{activePack.hardwarePartNumber}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-500 block text-[9px] font-sans font-bold">SW VERSION</span>
+                      <span className="text-white">{activePack.softwareVersion}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-slate-500 block text-[9px] font-sans font-bold">CALIBRATION ID</span>
+                      <span className="text-emerald-400 font-bold">{activePack.calibrationId}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-slate-500 block text-[9px] font-sans font-bold">PLATFORM TARGET</span>
+                      <span className="text-slate-300 text-[10px]">{activePack.targetPlatform}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Map Category Filters */}
+              <div className="bg-can-panel border border-can-border rounded-lg p-3 shadow-md space-y-2">
+                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">MAP CATEGORIES</div>
+                <div className="flex flex-wrap gap-1 text-xs">
+                  {['All', 'Fuel', 'Boost', 'Torque', 'Ignition', 'Airflow'].map(cat => (
+                    <button
+                      key={cat}
+                      onClick={() => setActiveCategory(cat)}
+                      className={`px-2 py-1 rounded font-semibold transition-all ${
+                        activeCategory === cat
+                          ? 'bg-sky-600 text-white shadow'
+                          : 'bg-can-bg border border-can-border text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+
+                {/* List of Maps */}
+                <div className="space-y-1 pt-2 max-h-72 overflow-y-auto">
+                  {filteredMaps.map(m => {
+                    const isSelected = activeMap?.mapId === m.mapId;
+                    return (
+                      <button
+                        key={m.mapId}
+                        onClick={() => setSelectedMapId(m.mapId)}
+                        className={`w-full text-left px-3 py-2 rounded flex items-center justify-between border transition-all ${
+                          isSelected
+                            ? 'bg-sky-600/20 border-sky-500 text-white font-bold'
+                            : 'bg-can-bg border-can-border/60 text-slate-300 hover:bg-slate-800'
+                        }`}
+                      >
+                        <div>
+                          <div className="text-xs truncate">{m.name}</div>
+                          <div className="text-[10px] text-slate-500 font-mono mt-0.5">
+                            {m.xAxis.breakpoints.length}×{m.yAxis ? m.yAxis.breakpoints.length : 1} • {m.zUnit}
+                          </div>
+                        </div>
+                        <ChevronRight className={`w-3.5 h-3.5 ${isSelected ? 'text-sky-400' : 'text-slate-600'}`} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Live Operating Point Monitor */}
+              <div className="bg-can-panel border border-can-border rounded-lg p-3.5 shadow-md space-y-2">
+                <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-can-border pb-1.5">
+                  <div className="flex items-center space-x-1.5 text-sky-400">
+                    <Activity className="w-4 h-4 animate-pulse" />
+                    <span>LIVE OPERATING POINT TRACER</span>
+                  </div>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                    tracerMode === 'LIVE_CAN' 
+                      ? 'bg-emerald-950 text-emerald-400 border-emerald-800' 
+                      : tracerMode === 'MANUAL_BENCH' 
+                      ? 'bg-sky-950 text-sky-400 border-sky-800' 
+                      : 'bg-purple-950 text-purple-400 border-purple-800'
+                  }`}>
+                    {tracerMode === 'LIVE_CAN' ? 'CAN BUS' : tracerMode === 'MANUAL_BENCH' ? 'BENCH SLIDER' : 'DEMO'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono pt-1">
+                  <div className="bg-can-bg border border-can-border p-2 rounded">
+                    <div className="text-[9px] text-slate-500 font-sans">CURRENT RPM</div>
+                    <div className="text-white font-bold text-sm mt-0.5">{currentRpm}</div>
+                  </div>
+                  <div className="bg-can-bg border border-can-border p-2 rounded">
+                    <div className="text-[9px] text-slate-500 font-sans truncate">{currentYData.label.toUpperCase()}</div>
+                    <div className="text-amber-400 font-bold text-sm mt-0.5">
+                      {currentYData.value} <span className="text-[10px] text-slate-400">{currentYData.unit}</span>
+                    </div>
+                  </div>
+                  <div className="bg-can-bg border border-can-border p-2 rounded">
+                    <div className="text-[9px] text-slate-500 font-sans">OUTPUT VALUE</div>
+                    <div className="text-sky-300 font-bold text-sm mt-0.5">
+                      {tracer ? tracer.interpolatedZValue.toFixed(activeMap?.decimalPrecision || 1) : '-'} <span className="text-[10px] text-slate-400">{activeMap?.zUnit}</span>
+                    </div>
+                  </div>
+                </div>
+                {tracerMode === 'LIVE_CAN' && (
+                  <div className="text-[10px] text-slate-400 font-sans pt-1 flex justify-between items-center border-t border-can-border/60">
+                    <span>CAN frames: <strong className="text-emerald-400 font-mono">{totalFrames}</strong></span>
+                    <span>Bus rate: <strong className="text-sky-400 font-mono">{fps} FPS</strong></span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* RIGHT: 2D Matrix or 3D Surface Visualization */}
+            <div className="col-span-12 lg:col-span-8 bg-can-panel border border-can-border rounded-lg p-5 shadow-xl space-y-4">
+              {activeMap ? (
+                <>
+                  {/* Map Title Bar */}
+                  <div className="flex flex-wrap items-center justify-between border-b border-can-border pb-3 gap-2">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <h2 className="text-base font-bold text-white font-sans">{activeMap.name}</h2>
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
+                          ADDR: {activeMap.memoryAddressHex}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 font-sans mt-0.5">{activeMap.description}</p>
+                    </div>
+
+                    <div className="flex items-center space-x-3 text-xs font-mono">
+                      <span className="text-slate-400">
+                        Range: <strong className="text-white">{activeMap.minValue}</strong> to <strong className="text-white">{activeMap.maxValue} {activeMap.zUnit}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 2D MATRIX VIEW */}
+                  {viewMode === '2D' && (
+                    <div className="overflow-x-auto pb-2">
+                      <table className="w-full text-[11px] font-mono border-collapse">
+                        <thead>
+                          <tr>
+                            <th className="p-2 text-left bg-slate-900 border border-slate-800 text-slate-500 text-[10px]">
+                              {activeMap.yAxis ? `${activeMap.yAxis.name} (${activeMap.yAxis.unit})` : 'Row'} \ {activeMap.xAxis.name} ({activeMap.xAxis.unit})
+                            </th>
+                            {activeMap.xAxis.breakpoints.map((bp, xIdx) => {
+                              const isHighlightedX = tracer?.nearestXIndex === xIdx;
+                              return (
+                                <th
+                                  key={xIdx}
+                                  className={`p-2 border text-center transition-colors ${
+                                    isHighlightedX ? 'bg-sky-600 text-white font-bold border-sky-400' : 'bg-slate-900 border-slate-800 text-sky-400'
+                                  }`}
+                                >
+                                  {bp}
+                                </th>
+                              );
+                            })}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeMap.zData.map((row, yIdx) => {
+                            const isHighlightedY = tracer?.nearestYIndex === yIdx;
+                            const rowLabel = activeMap.yAxis && activeMap.yAxis.breakpoints[yIdx] !== undefined 
+                              ? activeMap.yAxis.breakpoints[yIdx] 
+                              : yIdx;
+
+                            return (
+                              <tr key={yIdx}>
+                                <td
+                                  className={`p-2 border font-bold text-left whitespace-nowrap transition-colors ${
+                                    isHighlightedY ? 'bg-amber-600 text-white border-amber-400' : 'bg-slate-900/80 border-slate-800 text-amber-300'
+                                  }`}
+                                >
+                                  {rowLabel}
+                                </td>
+
+                                {row.map((cellVal, xIdx) => {
+                                  const isActiveCell = tracer?.nearestXIndex === xIdx && tracer?.nearestYIndex === yIdx;
+                                  const cellBg = getCellHeatmapBg(cellVal, activeMap.minValue, activeMap.maxValue, activeMap.heatmapPalette);
+
+                                  return (
+                                    <td
+                                      key={xIdx}
+                                      className={`p-2 border text-center transition-all ${cellBg} ${
+                                        isActiveCell
+                                          ? 'ring-2 ring-emerald-400 border-emerald-400 scale-105 z-10 shadow-lg font-black text-white'
+                                          : 'border-slate-800/80'
+                                      }`}
+                                      title={`RPM: ${activeMap.xAxis.breakpoints[xIdx]}, ${currentYData.label}: ${rowLabel}, Value: ${cellVal} ${activeMap.zUnit}`}
+                                    >
+                                      {cellVal.toFixed(activeMap.decimalPrecision)}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* 3D SURFACE / WIREFRAME PERSPECTIVE VIEW */}
+                  {viewMode === '3D' && (
+                    <div className="relative w-full h-[420px] bg-slate-950 border border-slate-800 rounded-lg overflow-hidden flex items-center justify-center p-4">
+                      {/* Isometric SVG 3D Mesh Renderer */}
+                      <svg viewBox="0 0 650 380" className="w-full h-full">
+                        <defs>
+                          <linearGradient id="meshGrad" x1="0" y1="1" x2="0" y2="0">
+                            <stop offset="0%" stopColor="#0369a1" stopOpacity="0.4" />
+                            <stop offset="50%" stopColor="#10b981" stopOpacity="0.5" />
+                            <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.7" />
+                          </linearGradient>
+                        </defs>
+
+                        {/* Render isometric mesh rows */}
+                        {activeMap.zData.map((row, yIdx) => {
+                          const originX = 320;
+                          const originY = 120;
+                          const colSpacing = 28;
+                          const rowSpacing = 16;
+                          const elevationScale = 140;
+
+                          const pts = row.map((val, xIdx) => {
+                            const normalizedZ = (val - activeMap.minValue) / (activeMap.maxValue - activeMap.minValue || 1);
+                            const sx = originX + (xIdx - yIdx) * colSpacing;
+                            const sy = originY + (xIdx + yIdx) * rowSpacing - (normalizedZ * elevationScale);
+                            return `${sx},${sy}`;
+                          });
+
+                          const polylinePoints = pts.join(' ');
+
+                          return (
+                            <g key={yIdx}>
+                              <polyline
+                                points={polylinePoints}
+                                fill="none"
+                                stroke="#38bdf8"
+                                strokeWidth="1.5"
+                                strokeOpacity={0.85}
+                              />
+
+                              {/* Highlight Active Tracer Node on 3D Surface */}
+                              {tracer?.nearestYIndex === yIdx && (
+                                <g>
+                                  {(() => {
+                                    const xIdx = tracer.nearestXIndex;
+                                    const val = row[xIdx] || 0;
+                                    const normZ = (val - activeMap.minValue) / (activeMap.maxValue - activeMap.minValue || 1);
+                                    const sx = originX + (xIdx - yIdx) * colSpacing;
+                                    const sy = originY + (xIdx + yIdx) * rowSpacing - (normZ * elevationScale);
+                                    return (
+                                      <g>
+                                        <circle cx={sx} cy={sy} r="6" fill="#10b981" stroke="#ffffff" strokeWidth="2" className="animate-ping" />
+                                        <circle cx={sx} cy={sy} r="4" fill="#34d399" />
+                                        <text x={sx + 10} y={sy - 10} fill="#34d399" fontSize="11" fontWeight="bold" fontFamily="monospace">
+                                          {tracer.interpolatedZValue.toFixed(activeMap.decimalPrecision)} {activeMap.zUnit}
+                                        </text>
+                                      </g>
+                                    );
+                                  })()}
+                                </g>
+                              )}
+                            </g>
+                          );
+                        })}
+
+                        {/* Column connection wireframes */}
+                        {activeMap.xAxis.breakpoints.map((_, xIdx) => {
+                          const originX = 320;
+                          const originY = 120;
+                          const colSpacing = 28;
+                          const rowSpacing = 16;
+                          const elevationScale = 140;
+
+                          const colPts = activeMap.zData.map((row, yIdx) => {
+                            const val = row[xIdx] || 0;
+                            const normZ = (val - activeMap.minValue) / (activeMap.maxValue - activeMap.minValue || 1);
+                            const sx = originX + (xIdx - yIdx) * colSpacing;
+                            const sy = originY + (xIdx + yIdx) * rowSpacing - (normZ * elevationScale);
+                            return `${sx},${sy}`;
+                          }).join(' ');
+
+                          return (
+                            <polyline
+                              key={`col_${xIdx}`}
+                              points={colPts}
+                              fill="none"
+                              stroke="#64748b"
+                              strokeWidth="1"
+                              strokeOpacity={0.4}
+                              strokeDasharray="2,2"
+                            />
+                          );
+                        })}
+                      </svg>
+
+                      {/* 3D Legend & Navigation Hint */}
+                      <div className="absolute bottom-3 left-3 bg-slate-900/80 border border-slate-800 rounded p-2 text-[10px] text-slate-400 font-sans space-y-1">
+                        <div className="font-bold text-white flex items-center space-x-1">
+                          <Compass className="w-3 h-3 text-sky-400" />
+                          <span>ISOMETRIC SURFACE PROJECTION</span>
+                        </div>
+                        <div>X-Axis: {activeMap.xAxis.name} ({activeMap.xAxis.unit}) • Y-Axis: {activeMap.yAxis?.name || 'Load'} ({activeMap.yAxis?.unit || '%'})</div>
+                        <div className="text-emerald-400 font-bold">Green Beacon: Active Operating Point ({tracerMode === 'LIVE_CAN' ? 'Live CANH/CANL' : tracerMode === 'MANUAL_BENCH' ? 'Bench Scrub' : 'Demo'})</div>
+                      </div>
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="p-12 text-center text-slate-500">Select a map from the catalog to view</div>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* Main Container: Map List on Left, Map Visualization on Right */}
-      <div className="grid grid-cols-12 gap-5 items-start">
-        {/* LEFT: Map Catalog & Hardware Metadata */}
-        <div className="col-span-12 lg:col-span-4 space-y-4 font-sans">
-          {/* Pack Metadata Card */}
-          {activePack && (
-            <div className="bg-can-panel border border-can-border rounded-lg p-3.5 shadow-md space-y-2 text-xs">
-              <div className="font-bold text-white uppercase tracking-wider flex items-center justify-between border-b border-can-border pb-2">
-                <span>ECU IDENTIFICATION</span>
-                <span className="text-[10px] px-1.5 py-0.5 bg-sky-950 border border-sky-800 text-sky-400 rounded font-mono">
-                  v{activePack.version}
+      {/* =========================================================================
+          VIEW 2: DYNAMIC LIVE 3D TABLE BUILDER (WORKS ON ANY ECU & ANY SIGNALS)
+          ========================================================================= */}
+      {workspaceMode === 'DYNAMIC_BUILDER' && (
+        <div className="space-y-5">
+          {/* Builder Configuration Bar */}
+          <div className="bg-can-panel border border-emerald-500/30 rounded-lg p-4 shadow-lg space-y-3 font-sans">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-can-border pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2 bg-emerald-500/20 border border-emerald-500/40 rounded-lg text-emerald-400">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-white">Universal Live 3D Surface Generator</h2>
+                  <p className="text-xs text-slate-400">
+                    Select any 3 signals from your connected CAN bus to generate a real-time correlated 2D matrix and 3D surface mesh
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-3">
+                <button
+                  onClick={handleSaveDynamicTable}
+                  disabled={isSavingCustomPack}
+                  className="px-4 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded font-bold text-xs flex items-center space-x-1.5 shadow transition-all"
+                  title="Persist this live generated table into the permanent Mappack catalog"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingCustomPack ? 'Saving...' : 'Save to Mappack Catalog'}</span>
+                </button>
+              </div>
+            </div>
+
+            {saveSuccessMsg && (
+              <div className="p-2 bg-emerald-950/60 border border-emerald-500 rounded text-emerald-300 text-xs font-bold flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                <span>{saveSuccessMsg}</span>
+              </div>
+            )}
+
+            {/* Signal Mapping Controls */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-1">X-AXIS SIGNAL (HORIZONTAL)</label>
+                <select
+                  value={dynXSignal}
+                  onChange={e => setDynXSignal(e.target.value)}
+                  className="w-full bg-can-bg border border-can-border rounded px-2.5 py-1.5 text-white font-mono font-bold"
+                >
+                  {availableSignalNames.map(sig => (
+                    <option key={sig} value={sig}>{sig} ({signals[sig]?.unit || ''})</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-sky-400 mt-1 block font-mono">
+                  Live: {signals[dynXSignal]?.engineeringValue !== undefined ? `${signals[dynXSignal]?.engineeringValue} ${signals[dynXSignal]?.unit}` : 'Waiting'}
                 </span>
               </div>
-              <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
-                <div>
-                  <span className="text-slate-500 block text-[9px] font-sans font-bold">HW PART NO</span>
-                  <span className="text-sky-300 font-bold">{activePack.hardwarePartNumber}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[9px] font-sans font-bold">SW VERSION</span>
-                  <span className="text-white">{activePack.softwareVersion}</span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-slate-500 block text-[9px] font-sans font-bold">CALIBRATION ID</span>
-                  <span className="text-emerald-400 font-bold">{activePack.calibrationId}</span>
-                </div>
-                <div className="col-span-2">
-                  <span className="text-slate-500 block text-[9px] font-sans font-bold">PLATFORM TARGET</span>
-                  <span className="text-slate-300 text-[10px]">{activePack.targetPlatform}</span>
-                </div>
-              </div>
-            </div>
-          )}
 
-          {/* Map Category Filters */}
-          <div className="bg-can-panel border border-can-border rounded-lg p-3 shadow-md space-y-2">
-            <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">MAP CATEGORIES</div>
-            <div className="flex flex-wrap gap-1 text-xs">
-              {['All', 'Fuel', 'Boost', 'Torque', 'Ignition', 'Airflow'].map(cat => (
-                <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  className={`px-2 py-1 rounded font-semibold transition-all ${
-                    activeCategory === cat
-                      ? 'bg-sky-600 text-white shadow'
-                      : 'bg-can-bg border border-can-border text-slate-400 hover:text-white'
-                  }`}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-1">Y-AXIS SIGNAL (VERTICAL)</label>
+                <select
+                  value={dynYSignal}
+                  onChange={e => setDynYSignal(e.target.value)}
+                  className="w-full bg-can-bg border border-can-border rounded px-2.5 py-1.5 text-white font-mono font-bold"
                 >
-                  {cat}
-                </button>
-              ))}
-            </div>
+                  {availableSignalNames.map(sig => (
+                    <option key={sig} value={sig}>{sig} ({signals[sig]?.unit || ''})</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-amber-400 mt-1 block font-mono">
+                  Live: {signals[dynYSignal]?.engineeringValue !== undefined ? `${signals[dynYSignal]?.engineeringValue} ${signals[dynYSignal]?.unit}` : 'Waiting'}
+                </span>
+              </div>
 
-            {/* List of Maps */}
-            <div className="space-y-1 pt-2 max-h-72 overflow-y-auto">
-              {filteredMaps.map(m => {
-                const isSelected = activeMap?.mapId === m.mapId;
-                return (
-                  <button
-                    key={m.mapId}
-                    onClick={() => setSelectedMapId(m.mapId)}
-                    className={`w-full text-left px-3 py-2 rounded flex items-center justify-between border transition-all ${
-                      isSelected
-                        ? 'bg-sky-600/20 border-sky-500 text-white font-bold'
-                        : 'bg-can-bg border-can-border/60 text-slate-300 hover:bg-slate-800'
-                    }`}
-                  >
-                    <div>
-                      <div className="text-xs truncate">{m.name}</div>
-                      <div className="text-[10px] text-slate-500 font-mono mt-0.5">
-                        {m.xAxis.breakpoints.length}×{m.yAxis ? m.yAxis.breakpoints.length : 1} • {m.zUnit}
-                      </div>
-                    </div>
-                    <ChevronRight className={`w-3.5 h-3.5 ${isSelected ? 'text-sky-400' : 'text-slate-600'}`} />
-                  </button>
-                );
-              })}
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-1">Z-OUTPUT VALUE (CELL METRIC)</label>
+                <select
+                  value={dynZSignal}
+                  onChange={e => setDynZSignal(e.target.value)}
+                  className="w-full bg-can-bg border border-can-border rounded px-2.5 py-1.5 text-white font-mono font-bold"
+                >
+                  {availableSignalNames.map(sig => (
+                    <option key={sig} value={sig}>{sig} ({signals[sig]?.unit || ''})</option>
+                  ))}
+                </select>
+                <span className="text-[10px] text-emerald-400 mt-1 block font-mono">
+                  Live: {signals[dynZSignal]?.engineeringValue !== undefined ? `${signals[dynZSignal]?.engineeringValue} ${signals[dynZSignal]?.unit}` : 'Waiting'}
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-400 font-bold mb-1">CUSTOM TABLE LABEL</label>
+                <input
+                  type="text"
+                  value={dynTableName}
+                  onChange={e => setDynTableName(e.target.value)}
+                  placeholder="e.g. Live Boost Target"
+                  className="w-full bg-can-bg border border-can-border rounded px-2.5 py-1.5 text-white text-xs"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Grid: 8×8 Matrix • Auto-Binned Breakpoints
+                </span>
+              </div>
             </div>
           </div>
 
-          {/* Live Operating Point Monitor */}
-          <div className="bg-can-panel border border-can-border rounded-lg p-3.5 shadow-md space-y-2">
-            <div className="flex items-center justify-between text-xs font-bold text-slate-300 border-b border-can-border pb-1.5">
-              <div className="flex items-center space-x-1.5 text-sky-400">
-                <Activity className="w-4 h-4 animate-pulse" />
-                <span>LIVE OPERATING POINT TRACER</span>
+          {/* Dynamic Generated Table Grid and 3D Visualizer */}
+          <div className="bg-can-panel border border-can-border rounded-lg p-5 shadow-xl space-y-4">
+            <div className="flex flex-wrap items-center justify-between border-b border-can-border pb-3">
+              <div>
+                <h3 className="text-base font-bold text-white font-sans">{dynTableName}</h3>
+                <p className="text-xs text-slate-400 font-sans mt-0.5">
+                  X: <strong className="text-sky-300 font-mono">{dynXSignal}</strong> • Y: <strong className="text-amber-300 font-mono">{dynYSignal}</strong> • Z (Cells): <strong className="text-emerald-300 font-mono">{dynZSignal}</strong>
+                </p>
               </div>
-              <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                tracerMode === 'LIVE_CAN' 
-                  ? 'bg-emerald-950 text-emerald-400 border-emerald-800' 
-                  : tracerMode === 'MANUAL_BENCH' 
-                  ? 'bg-sky-950 text-sky-400 border-sky-800' 
-                  : 'bg-purple-950 text-purple-400 border-purple-800'
-              }`}>
-                {tracerMode === 'LIVE_CAN' ? 'CAN BUS' : tracerMode === 'MANUAL_BENCH' ? 'BENCH SLIDER' : 'DEMO'}
-              </span>
-            </div>
-            <div className="grid grid-cols-3 gap-2 text-center text-xs font-mono pt-1">
-              <div className="bg-can-bg border border-can-border p-2 rounded">
-                <div className="text-[9px] text-slate-500 font-sans">CURRENT RPM</div>
-                <div className="text-white font-bold text-sm mt-0.5">{currentRpm}</div>
-              </div>
-              <div className="bg-can-bg border border-can-border p-2 rounded">
-                <div className="text-[9px] text-slate-500 font-sans truncate">{currentYData.label.toUpperCase()}</div>
-                <div className="text-amber-400 font-bold text-sm mt-0.5">
-                  {currentYData.value} <span className="text-[10px] text-slate-400">{currentYData.unit}</span>
-                </div>
-              </div>
-              <div className="bg-can-bg border border-can-border p-2 rounded">
-                <div className="text-[9px] text-slate-500 font-sans">OUTPUT VALUE</div>
-                <div className="text-sky-300 font-bold text-sm mt-0.5">
-                  {tracer ? tracer.interpolatedZValue.toFixed(activeMap?.decimalPrecision || 1) : '-'} <span className="text-[10px] text-slate-400">{activeMap?.zUnit}</span>
-                </div>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => setViewMode(viewMode === '2D' ? '3D' : '2D')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded text-xs font-bold font-sans flex items-center space-x-1.5 transition-all"
+                >
+                  {viewMode === '2D' ? <Rotate3d className="w-3.5 h-3.5" /> : <Grid className="w-3.5 h-3.5" />}
+                  <span>Switch to {viewMode === '2D' ? '3D Surface' : '2D Matrix'}</span>
+                </button>
               </div>
             </div>
-            {tracerMode === 'LIVE_CAN' && (
-              <div className="text-[10px] text-slate-400 font-sans pt-1 flex justify-between items-center border-t border-can-border/60">
-                <span>CAN frames: <strong className="text-emerald-400 font-mono">{totalFrames}</strong></span>
-                <span>Bus rate: <strong className="text-sky-400 font-mono">{fps} FPS</strong></span>
+
+            {/* 2D Dynamic Table Grid */}
+            {viewMode === '2D' && (
+              <div className="overflow-x-auto pb-2 font-mono">
+                <table className="w-full text-[11px] border-collapse">
+                  <thead>
+                    <tr>
+                      <th className="p-2 text-left bg-slate-900 border border-slate-800 text-slate-500 text-[10px]">
+                        {dynYSignal} \ {dynXSignal}
+                      </th>
+                      {dynXBreakpoints.map((bp, xIdx) => (
+                        <th key={xIdx} className="p-2 border text-center bg-slate-900 border-slate-800 text-sky-400 font-bold">
+                          {bp}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {dynCellAccumulator.map((row, yIdx) => {
+                      const rowLabel = dynYBreakpoints[yIdx];
+                      const minZ = Math.min(...dynCellAccumulator.flat());
+                      const maxZ = Math.max(...dynCellAccumulator.flat());
+
+                      return (
+                        <tr key={yIdx}>
+                          <td className="p-2 border font-bold text-left bg-slate-900/80 border-slate-800 text-amber-300 whitespace-nowrap">
+                            {rowLabel}
+                          </td>
+                          {row.map((cellVal, xIdx) => {
+                            const bg = getCellHeatmapBg(cellVal, minZ, maxZ, 'turbo');
+                            return (
+                              <td
+                                key={xIdx}
+                                className={`p-2 border text-center transition-all ${bg} border-slate-800/80`}
+                              >
+                                {cellVal.toFixed(1)}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* 3D Isometric Mesh View for Dynamic Builder */}
+            {viewMode === '3D' && (
+              <div className="relative w-full h-[400px] bg-slate-950 border border-slate-800 rounded-lg overflow-hidden flex items-center justify-center p-4">
+                <svg viewBox="0 0 650 380" className="w-full h-full">
+                  {dynCellAccumulator.map((row, yIdx) => {
+                    const originX = 320;
+                    const originY = 120;
+                    const colSpacing = 28;
+                    const rowSpacing = 16;
+                    const elevationScale = 120;
+                    const minZ = Math.min(...dynCellAccumulator.flat());
+                    const maxZ = Math.max(...dynCellAccumulator.flat()) || 1;
+
+                    const pts = row.map((val, xIdx) => {
+                      const normalizedZ = (val - minZ) / (maxZ - minZ || 1);
+                      const sx = originX + (xIdx - yIdx) * colSpacing;
+                      const sy = originY + (xIdx + yIdx) * rowSpacing - (normalizedZ * elevationScale);
+                      return `${sx},${sy}`;
+                    });
+
+                    return (
+                      <polyline
+                        key={yIdx}
+                        points={pts.join(' ')}
+                        fill="none"
+                        stroke="#10b981"
+                        strokeWidth="1.5"
+                        strokeOpacity={0.85}
+                      />
+                    );
+                  })}
+                </svg>
+
+                <div className="absolute bottom-3 left-3 bg-slate-900/80 border border-slate-800 rounded p-2 text-[10px] text-slate-400 font-sans">
+                  <div className="font-bold text-white">UNIVERSAL SIGNAL SURFACE PROJECTION</div>
+                  <div>Live Real-Time CAN Bivariate Mesh Generator</div>
+                </div>
               </div>
             )}
           </div>
         </div>
-
-        {/* RIGHT: 2D Matrix or 3D Surface Visualization */}
-        <div className="col-span-12 lg:col-span-8 bg-can-panel border border-can-border rounded-lg p-5 shadow-xl space-y-4">
-          {activeMap ? (
-            <>
-              {/* Map Title Bar */}
-              <div className="flex flex-wrap items-center justify-between border-b border-can-border pb-3 gap-2">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <h2 className="text-base font-bold text-white font-sans">{activeMap.name}</h2>
-                    <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 text-slate-400 rounded">
-                      ADDR: {activeMap.memoryAddressHex}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-400 font-sans mt-0.5">{activeMap.description}</p>
-                </div>
-
-                <div className="flex items-center space-x-3 text-xs font-mono">
-                  <span className="text-slate-400">
-                    Range: <strong className="text-white">{activeMap.minValue}</strong> to <strong className="text-white">{activeMap.maxValue} {activeMap.zUnit}</strong>
-                  </span>
-                </div>
-              </div>
-
-              {/* 2D MATRIX VIEW */}
-              {viewMode === '2D' && (
-                <div className="overflow-x-auto pb-2">
-                  <table className="w-full text-[11px] font-mono border-collapse">
-                    <thead>
-                      <tr>
-                        <th className="p-2 text-left bg-slate-900 border border-slate-800 text-slate-500 text-[10px]">
-                          {activeMap.yAxis ? `${activeMap.yAxis.name} (${activeMap.yAxis.unit})` : 'Row'} \ {activeMap.xAxis.name} ({activeMap.xAxis.unit})
-                        </th>
-                        {activeMap.xAxis.breakpoints.map((bp, xIdx) => {
-                          const isHighlightedX = tracer?.nearestXIndex === xIdx;
-                          return (
-                            <th
-                              key={xIdx}
-                              className={`p-2 border text-center transition-colors ${
-                                isHighlightedX ? 'bg-sky-600 text-white font-bold border-sky-400' : 'bg-slate-900 border-slate-800 text-sky-400'
-                              }`}
-                            >
-                              {bp}
-                            </th>
-                          );
-                        })}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {activeMap.zData.map((row, yIdx) => {
-                        const isHighlightedY = tracer?.nearestYIndex === yIdx;
-                        const rowLabel = activeMap.yAxis && activeMap.yAxis.breakpoints[yIdx] !== undefined 
-                          ? activeMap.yAxis.breakpoints[yIdx] 
-                          : yIdx;
-
-                        return (
-                          <tr key={yIdx}>
-                            <td
-                              className={`p-2 border font-bold text-left whitespace-nowrap transition-colors ${
-                                isHighlightedY ? 'bg-amber-600 text-white border-amber-400' : 'bg-slate-900/80 border-slate-800 text-amber-300'
-                              }`}
-                            >
-                              {rowLabel}
-                            </td>
-
-                            {row.map((cellVal, xIdx) => {
-                              const isActiveCell = tracer?.nearestXIndex === xIdx && tracer?.nearestYIndex === yIdx;
-                              const cellBg = getCellHeatmapBg(cellVal, activeMap.minValue, activeMap.maxValue, activeMap.heatmapPalette);
-
-                              return (
-                                <td
-                                  key={xIdx}
-                                  className={`p-2 border text-center transition-all ${cellBg} ${
-                                    isActiveCell
-                                      ? 'ring-2 ring-emerald-400 border-emerald-400 scale-105 z-10 shadow-lg font-black text-white'
-                                      : 'border-slate-800/80'
-                                  }`}
-                                  title={`RPM: ${activeMap.xAxis.breakpoints[xIdx]}, ${currentYData.label}: ${rowLabel}, Value: ${cellVal} ${activeMap.zUnit}`}
-                                >
-                                  {cellVal.toFixed(activeMap.decimalPrecision)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {/* 3D SURFACE / WIREFRAME PERSPECTIVE VIEW */}
-              {viewMode === '3D' && (
-                <div className="relative w-full h-[420px] bg-slate-950 border border-slate-800 rounded-lg overflow-hidden flex items-center justify-center p-4">
-                  {/* Isometric SVG 3D Mesh Renderer */}
-                  <svg viewBox="0 0 650 380" className="w-full h-full">
-                    <defs>
-                      <linearGradient id="meshGrad" x1="0" y1="1" x2="0" y2="0">
-                        <stop offset="0%" stopColor="#0369a1" stopOpacity="0.4" />
-                        <stop offset="50%" stopColor="#10b981" stopOpacity="0.5" />
-                        <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.7" />
-                      </linearGradient>
-                    </defs>
-
-                    {/* Render isometric mesh rows */}
-                    {activeMap.zData.map((row, yIdx) => {
-                      const originX = 320;
-                      const originY = 120;
-                      const colSpacing = 28;
-                      const rowSpacing = 16;
-                      const elevationScale = 140;
-
-                      const pts = row.map((val, xIdx) => {
-                        const normalizedZ = (val - activeMap.minValue) / (activeMap.maxValue - activeMap.minValue || 1);
-                        const sx = originX + (xIdx - yIdx) * colSpacing;
-                        const sy = originY + (xIdx + yIdx) * rowSpacing - (normalizedZ * elevationScale);
-                        return `${sx},${sy}`;
-                      });
-
-                      const polylinePoints = pts.join(' ');
-
-                      return (
-                        <g key={yIdx}>
-                          <polyline
-                            points={polylinePoints}
-                            fill="none"
-                            stroke="#38bdf8"
-                            strokeWidth="1.5"
-                            strokeOpacity={0.85}
-                          />
-
-                          {/* Highlight Active Tracer Node on 3D Surface */}
-                          {tracer?.nearestYIndex === yIdx && (
-                            <g>
-                              {(() => {
-                                const xIdx = tracer.nearestXIndex;
-                                const val = row[xIdx] || 0;
-                                const normZ = (val - activeMap.minValue) / (activeMap.maxValue - activeMap.minValue || 1);
-                                const sx = originX + (xIdx - yIdx) * colSpacing;
-                                const sy = originY + (xIdx + yIdx) * rowSpacing - (normZ * elevationScale);
-                                return (
-                                  <g>
-                                    <circle cx={sx} cy={sy} r="6" fill="#10b981" stroke="#ffffff" strokeWidth="2" className="animate-ping" />
-                                    <circle cx={sx} cy={sy} r="4" fill="#34d399" />
-                                    <text x={sx + 10} y={sy - 10} fill="#34d399" fontSize="11" fontWeight="bold" fontFamily="monospace">
-                                      {tracer.interpolatedZValue.toFixed(activeMap.decimalPrecision)} {activeMap.zUnit}
-                                    </text>
-                                  </g>
-                                );
-                              })()}
-                            </g>
-                          )}
-                        </g>
-                      );
-                    })}
-
-                    {/* Column connection wireframes */}
-                    {activeMap.xAxis.breakpoints.map((_, xIdx) => {
-                      const originX = 320;
-                      const originY = 120;
-                      const colSpacing = 28;
-                      const rowSpacing = 16;
-                      const elevationScale = 140;
-
-                      const colPts = activeMap.zData.map((row, yIdx) => {
-                        const val = row[xIdx] || 0;
-                        const normZ = (val - activeMap.minValue) / (activeMap.maxValue - activeMap.minValue || 1);
-                        const sx = originX + (xIdx - yIdx) * colSpacing;
-                        const sy = originY + (xIdx + yIdx) * rowSpacing - (normZ * elevationScale);
-                        return `${sx},${sy}`;
-                      }).join(' ');
-
-                      return (
-                        <polyline
-                          key={`col_${xIdx}`}
-                          points={colPts}
-                          fill="none"
-                          stroke="#64748b"
-                          strokeWidth="1"
-                          strokeOpacity={0.4}
-                          strokeDasharray="2,2"
-                        />
-                      );
-                    })}
-                  </svg>
-
-                  {/* 3D Legend & Navigation Hint */}
-                  <div className="absolute bottom-3 left-3 bg-slate-900/80 border border-slate-800 rounded p-2 text-[10px] text-slate-400 font-sans space-y-1">
-                    <div className="font-bold text-white flex items-center space-x-1">
-                      <Compass className="w-3 h-3 text-sky-400" />
-                      <span>ISOMETRIC SURFACE PROJECTION</span>
-                    </div>
-                    <div>X-Axis: {activeMap.xAxis.name} ({activeMap.xAxis.unit}) • Y-Axis: {activeMap.yAxis?.name || 'Load'} ({activeMap.yAxis?.unit || '%'})</div>
-                    <div className="text-emerald-400 font-bold">Green Beacon: Active Operating Point ({tracerMode === 'LIVE_CAN' ? 'Live CANH/CANL' : tracerMode === 'MANUAL_BENCH' ? 'Bench Scrub' : 'Demo'})</div>
-                  </div>
-                </div>
-              )}
-            </>
-          ) : (
-            <div className="p-12 text-center text-slate-500">Select a map from the catalog to view</div>
-          )}
-        </div>
-      </div>
+      )}
     </div>
   );
 };

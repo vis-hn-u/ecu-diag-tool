@@ -1106,6 +1106,14 @@ export const api = {
     const res = await fetch(`${API_BASE}/mappack/packs/${packId}/maps/${mapId}/trace?rpm=${rpm}&load=${load}`);
     return res.json();
   },
+  addCustomMappack: async (pack: EcuDefinitionPack): Promise<EcuDefinitionPack> => {
+    const res = await fetch(`${API_BASE}/mappack/packs/custom`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(pack)
+    });
+    return res.json();
+  },
 
   // Centralized Reporting & PDF Generation
   getReportTypes: async (): Promise<{ id: string; name: string; description: string }[]> => {

@@ -59,4 +59,15 @@ public class MappackController : ControllerBase
         var tracer = _mappackService.CalculateOperatingPoint(packId, mapId, rpm, load);
         return Ok(tracer);
     }
+
+    [HttpPost("packs/custom")]
+    public ActionResult<EcuDefinitionPack> AddCustomPack([FromBody] EcuDefinitionPack pack)
+    {
+        if (pack == null || string.IsNullOrWhiteSpace(pack.Id))
+        {
+            return BadRequest("A valid pack with an Id is required.");
+        }
+        _mappackService.AddCustomPack(pack);
+        return Ok(pack);
+    }
 }
