@@ -76,7 +76,7 @@ public class EcuDefinitionPackService : IEcuDefinitionPackService
         }
         tracer.NearestXIndex = bestX;
 
-        // Find nearest Y index (Load)
+        // Find nearest Y index (Load / IQ / Throttle / Pressure)
         int bestY = 0;
         if (map.YAxis != null && map.YAxis.Breakpoints.Length > 0)
         {
@@ -93,8 +93,63 @@ public class EcuDefinitionPackService : IEcuDefinitionPackService
             tracer.NearestYIndex = bestY;
         }
 
-        // Bilinear interpolation for Z value
-        if (map.ZData.Length > bestY && map.ZData[bestY].Length > bestX)
+        // True Bilinear Interpolation for smooth continuous Z value
+        if (map.YAxis != null && map.YAxis.Breakpoints.Length > 1 && map.XAxis.Breakpoints.Length > 1)
+        {
+            // Find bounding X indices [x0, x1]
+            int x0 = 0;
+            for (int i = 0; i < map.XAxis.Breakpoints.Length - 1; i++)
+            {
+                if (rpm >= map.XAxis.Breakpoints[i] && rpm <= map.XAxis.Breakpoints[i + 1])
+                {
+                    x0 = i;
+                    break;
+                }
+                if (rpm > map.XAxis.Breakpoints[i + 1]) x0 = i + 1;
+            }
+            int x1 = Math.Min(x0 + 1, map.XAxis.Breakpoints.Length - 1);
+            if (x0 == x1 && x0 > 0) x0--;
+
+            // Find bounding Y indices [y0, y1]
+            int y0 = 0;
+            for (int j = 0; j < map.YAxis.Breakpoints.Length - 1; j++)
+            {
+                if (load >= map.YAxis.Breakpoints[j] && load <= map.YAxis.Breakpoints[j + 1])
+                {
+                    y0 = j;
+                    break;
+                }
+                if (load > map.YAxis.Breakpoints[j + 1]) y0 = j + 1;
+            }
+            int y1 = Math.Min(y0 + 1, map.YAxis.Breakpoints.Length - 1);
+            if (y0 == y1 && y0 > 0) y0--;
+
+            double xSpan = map.XAxis.Breakpoints[x1] - map.XAxis.Breakpoints[x0];
+            double ySpan = map.YAxis.Breakpoints[y1] - map.YAxis.Breakpoints[y0];
+
+            double tx = xSpan > 0.0001 ? Math.Clamp((rpm - map.XAxis.Breakpoints[x0]) / xSpan, 0.0, 1.0) : 0.0;
+            double ty = ySpan > 0.0001 ? Math.Clamp((load - map.YAxis.Breakpoints[y0]) / ySpan, 0.0, 1.0) : 0.0;
+
+            if (map.ZData.Length > y1 && map.ZData[y0].Length > x1 && map.ZData[y1].Length > x1)
+            {
+                double z00 = map.ZData[y0][x0];
+                double z01 = map.ZData[y0][x1];
+                double z10 = map.ZData[y1][x0];
+                double z11 = map.ZData[y1][x1];
+
+                double interpZ = (1.0 - tx) * (1.0 - ty) * z00 +
+                                 tx * (1.0 - ty) * z01 +
+                                 (1.0 - tx) * ty * z10 +
+                                 tx * ty * z11;
+
+                tracer.InterpolatedZValue = Math.Round(interpZ, map.DecimalPrecision);
+            }
+            else if (map.ZData.Length > bestY && map.ZData[bestY].Length > bestX)
+            {
+                tracer.InterpolatedZValue = map.ZData[bestY][bestX];
+            }
+        }
+        else if (map.ZData.Length > bestY && map.ZData[bestY].Length > bestX)
         {
             tracer.InterpolatedZValue = map.ZData[bestY][bestX];
         }
@@ -104,7 +159,216 @@ public class EcuDefinitionPackService : IEcuDefinitionPackService
 
     private void InitializePacks()
     {
-        // 0. Magneti Marelli MJD (Maruti Suzuki Swift Diesel 1.3 DDiS)
+        // 0. Bosch EDC17C55 / EDC17C53 (TriCore TC1767 - C04 / C63 Diesel)
+        var edc17 = new EcuDefinitionPack
+        {
+            Id = "edc17c55_c04_c63",
+            Name = "Bosch EDC17C55 / EDC17C53 (Mahindra 2.2 mHawk - C04 / C63)",
+            TargetPlatform = "Mahindra Scorpio / Thar / XUV500 2.2 mHawk & Tata 2.2 Dicor (EDC17C55 TC1767)",
+            HardwarePartNumber = "0281017832 / 0281031388",
+            SoftwareVersion = "1037521876 / C04_C63",
+            CalibrationId = "EDC17C55_C04_C63",
+            Author = "Bosch Diesel Systems A2L / DAMOS Calibration Reference",
+            Version = "2.4",
+            SupportedProtocols = new List<string> { "UDS (ISO 14229)", "KWP2000 (ISO 14230)", "CAN ISO-TP" }
+        };
+
+        // Map 1: Driver Wish (RPM x Pedal %) -> Injected Quantity (mm³/stk)
+        double[] edc17PedalRpm = { 800, 1200, 1600, 2000, 2500, 3000, 3500, 4000, 4400 };
+        double[] edc17PedalPct = { 0, 10, 20, 35, 50, 70, 85, 100 };
+        double[][] edc17DriverWish = new double[edc17PedalPct.Length][];
+        for (int y = 0; y < edc17PedalPct.Length; y++)
+        {
+            edc17DriverWish[y] = new double[edc17PedalRpm.Length];
+            for (int x = 0; x < edc17PedalRpm.Length; x++)
+            {
+                double baseIq = (edc17PedalPct[y] / 100.0) * 64.0;
+                if (edc17PedalRpm[x] > 4000) baseIq *= Math.Max(0.0, 1.0 - ((edc17PedalRpm[x] - 4000) / 500.0));
+                edc17DriverWish[y][x] = Math.Round(baseIq, 1);
+            }
+        }
+        edc17.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "EDC17_DriverWish",
+            Name = "Driver Wish (Pedal % vs Injected Fuel Quantity)",
+            Category = MapCategory.Torque,
+            Description = "Translates driver accelerator pedal position demand into requested injected fuel volume per cylinder stroke",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x8004A200",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = edc17PedalRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Pedal Position", Unit = "%", Breakpoints = edc17PedalPct },
+            ZData = edc17DriverWish,
+            ZUnit = "mm³/stk",
+            MinValue = 0.0,
+            MaxValue = 65.0,
+            DecimalPrecision = 1,
+            HeatmapPalette = "magma"
+        });
+
+        // Map 2: Common Rail Target Fuel Pressure (RPM x Injected Quantity) -> Rail Pressure bar
+        double[] edc17RailRpm = { 800, 1200, 1600, 2000, 2400, 2800, 3200, 3600, 4000, 4400 };
+        double[] edc17RailIq = { 5, 10, 15, 20, 30, 40, 50, 60 };
+        double[][] edc17RailData = new double[edc17RailIq.Length][];
+        for (int y = 0; y < edc17RailIq.Length; y++)
+        {
+            edc17RailData[y] = new double[edc17RailRpm.Length];
+            for (int x = 0; x < edc17RailRpm.Length; x++)
+            {
+                double basePressure = 280.0 + (edc17RailRpm[x] * 0.16);
+                double loadPressure = edc17RailIq[y] * 16.5;
+                edc17RailData[y][x] = Math.Round(Math.Min(1800.0, Math.Max(260.0, basePressure + loadPressure)), 0);
+            }
+        }
+        edc17.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "EDC17_RailPressure",
+            Name = "Common Rail Fuel Pressure Target",
+            Category = MapCategory.Fuel,
+            Description = "Target high-pressure common rail fuel setpoint commanded to DRV and CP4 metering unit",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x8006E100",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = edc17RailRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Injected Quantity", Unit = "mm³/stk", Breakpoints = edc17RailIq },
+            ZData = edc17RailData,
+            ZUnit = "bar",
+            MinValue = 250.0,
+            MaxValue = 1800.0,
+            DecimalPrecision = 0,
+            HeatmapPalette = "turbo"
+        });
+
+        // Map 3: Target Turbocharger Boost Pressure (RPM x Injected Quantity) -> Absolute Boost mbar
+        double[] edc17BoostRpm = { 1000, 1400, 1750, 2000, 2400, 2800, 3200, 3600, 4000, 4400 };
+        double[] edc17BoostIq = { 10, 20, 30, 40, 50, 60 };
+        double[][] edc17BoostData = new double[edc17BoostIq.Length][];
+        for (int y = 0; y < edc17BoostIq.Length; y++)
+        {
+            edc17BoostData[y] = new double[edc17BoostRpm.Length];
+            for (int x = 0; x < edc17BoostRpm.Length; x++)
+            {
+                double targetMbar = 1013.0 + (edc17BoostIq[y] > 15 ? (edc17BoostIq[y] - 15) * 31.0 : 0.0);
+                if (edc17BoostRpm[x] > 3800) targetMbar -= (edc17BoostRpm[x] - 3800) * 0.22;
+                edc17BoostData[y][x] = Math.Round(Math.Min(2550.0, Math.Max(1000.0, targetMbar)), 0);
+            }
+        }
+        edc17.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "EDC17_TargetBoost",
+            Name = "Variable VGT Turbocharger Boost Target",
+            Category = MapCategory.Boost,
+            Description = "Desired absolute intake manifold charge pressure commanded to Garrett/Honeywell electronic VGT actuator",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x8008F440",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = edc17BoostRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Injected Quantity", Unit = "mm³/stk", Breakpoints = edc17BoostIq },
+            ZData = edc17BoostData,
+            ZUnit = "mbar",
+            MinValue = 980.0,
+            MaxValue = 2600.0,
+            DecimalPrecision = 0,
+            HeatmapPalette = "viridis"
+        });
+
+        // Map 4: Smoke Limiter / AFR Map (RPM x Air Mass) -> Max Injected Quantity mm³/stk
+        double[] edc17SmokeRpm = { 1000, 1400, 1800, 2200, 2600, 3000, 3500, 4000, 4400 };
+        double[] edc17AirMass = { 300, 400, 500, 650, 800, 950, 1100 };
+        double[][] edc17SmokeData = new double[edc17AirMass.Length][];
+        for (int y = 0; y < edc17AirMass.Length; y++)
+        {
+            edc17SmokeData[y] = new double[edc17SmokeRpm.Length];
+            for (int x = 0; x < edc17SmokeRpm.Length; x++)
+            {
+                double maxIq = (edc17AirMass[y] / 17.0);
+                if (edc17SmokeRpm[x] < 1400) maxIq *= 0.82;
+                edc17SmokeData[y][x] = Math.Round(Math.Min(65.0, Math.Max(12.0, maxIq)), 1);
+            }
+        }
+        edc17.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "EDC17_SmokeLimiter",
+            Name = "Smoke Limiter (MAF Air Mass vs Max Fuel)",
+            Category = MapCategory.Airflow,
+            Description = "Soot prevention limit: calculates maximum allowable injected fuel quantity based on measured hot-film MAF airflow",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x800A4100",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = edc17SmokeRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Air Mass", Unit = "mg/hub", Breakpoints = edc17AirMass },
+            ZData = edc17SmokeData,
+            ZUnit = "mm³/stk",
+            MinValue = 10.0,
+            MaxValue = 65.0,
+            DecimalPrecision = 1,
+            HeatmapPalette = "coolwarm"
+        });
+
+        // Map 5: Engine Torque Limiter (RPM x Atmospheric Pressure) -> Torque Nm
+        double[] edc17TorqueRpm = { 800, 1200, 1600, 2000, 2400, 2800, 3200, 3600, 4000, 4400 };
+        double[] edc17Atmosphere = { 700, 800, 900, 1000 };
+        double[][] edc17TorqueData = new double[edc17Atmosphere.Length][];
+        for (int y = 0; y < edc17Atmosphere.Length; y++)
+        {
+            edc17TorqueData[y] = new double[edc17TorqueRpm.Length];
+            for (int x = 0; x < edc17TorqueRpm.Length; x++)
+            {
+                double rpm = edc17TorqueRpm[x];
+                double peakNm = (rpm >= 1600 && rpm <= 2600) ? 320.0 : (rpm < 1600 ? 210.0 + ((rpm - 800) * 0.137) : 320.0 - ((rpm - 2600) * 0.065));
+                double altitudeFactor = edc17Atmosphere[y] / 1000.0;
+                edc17TorqueData[y][x] = Math.Round(peakNm * altitudeFactor, 0);
+            }
+        }
+        edc17.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "EDC17_TorqueLimiter",
+            Name = "Engine Torque Limiter (Atmospheric Altitude Protection)",
+            Category = MapCategory.Torque,
+            Description = "Maximum engine crank torque allowed by drivetrain, de-rated at higher altitudes to prevent turbo overspeed",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x800C3300",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = edc17TorqueRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Ambient Pressure", Unit = "hPa", Breakpoints = edc17Atmosphere },
+            ZData = edc17TorqueData,
+            ZUnit = "Nm",
+            MinValue = 140.0,
+            MaxValue = 330.0,
+            DecimalPrecision = 0,
+            HeatmapPalette = "viridis"
+        });
+
+        // Map 6: Start of Injection (SOI) Main Angle (RPM x Injected Quantity) -> °BTDC
+        double[] edc17SoiRpm = { 800, 1200, 1600, 2000, 2500, 3000, 3500, 4000, 4400 };
+        double[] edc17SoiIq = { 5, 10, 20, 30, 40, 50, 60 };
+        double[][] edc17SoiData = new double[edc17SoiIq.Length][];
+        for (int y = 0; y < edc17SoiIq.Length; y++)
+        {
+            edc17SoiData[y] = new double[edc17SoiRpm.Length];
+            for (int x = 0; x < edc17SoiRpm.Length; x++)
+            {
+                double rpmAdvance = (edc17SoiRpm[x] - 800) * 0.0042;
+                double loadAdvance = edc17SoiIq[y] * 0.07;
+                edc17SoiData[y][x] = Math.Round(-1.5 + rpmAdvance + loadAdvance, 1);
+            }
+        }
+        edc17.Maps.Add(new ReadonlyEcuMap
+        {
+            MapId = "EDC17_StartOfInjection",
+            Name = "Start of Injection (SOI Base Advance)",
+            Category = MapCategory.Ignition,
+            Description = "Main start of injection timing angle relative to Top Dead Center (negative = after TDC, positive = before TDC)",
+            Dimension = MapDimension.TwoDimensional,
+            MemoryAddressHex = "0x800D6040",
+            XAxis = new ReadonlyMapAxis { Name = "Engine Speed", Unit = "RPM", Breakpoints = edc17SoiRpm },
+            YAxis = new ReadonlyMapAxis { Name = "Injected Quantity", Unit = "mm³/stk", Breakpoints = edc17SoiIq },
+            ZData = edc17SoiData,
+            ZUnit = "°BTDC",
+            MinValue = -3.0,
+            MaxValue = 22.0,
+            DecimalPrecision = 1,
+            HeatmapPalette = "coolwarm"
+        });
+
+        _packs.Add(edc17);
+
+        // 1. Magneti Marelli MJD (Maruti Suzuki Swift Diesel 1.3 DDiS)
         var marelliMjd = new EcuDefinitionPack
         {
             Id = "marelli_mjd_swift_ddis",
