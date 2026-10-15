@@ -272,7 +272,20 @@ public class HardwareManager : IAutomotiveHardwareManager
     {
         lock (_lock)
         {
-            return _activeTransport?.GetStatus();
+            var activeStatus = _activeTransport?.GetStatus();
+            if (activeStatus != null && activeStatus.IsConnected)
+            {
+                return activeStatus;
+            }
+
+            // Fallback: check if any registered transport is connected
+            var connectedTransport = _canTransports.Values.Distinct().FirstOrDefault(t => t.GetStatus().IsConnected);
+            if (connectedTransport != null)
+            {
+                return connectedTransport.GetStatus();
+            }
+
+            return activeStatus ?? _canTransports.Values.FirstOrDefault()?.GetStatus();
         }
     }
 
@@ -284,9 +297,21 @@ public class HardwareManager : IAutomotiveHardwareManager
             transport = _activeTransport;
         }
 
-        if (transport == null || !transport.Capabilities.SupportsTransmit)
+        if (transport == null || !transport.Capabilities.SupportsTransmit || !transport.GetStatus().IsConnected)
         {
-            return false;
+            // Fallback to any connected transport with transmit capability (e.g. GVRET serial or Waveshare)
+            var transmitFallback = _canTransports.Values
+                .Distinct()
+                .FirstOrDefault(t => t.GetStatus().IsConnected && t.Capabilities.SupportsTransmit);
+
+            if (transmitFallback != null)
+            {
+                transport = transmitFallback;
+            }
+            else if (transport == null || !transport.Capabilities.SupportsTransmit)
+            {
+                return false;
+            }
         }
 
         return await transport.SendFrameAsync(frame, cancellationToken);

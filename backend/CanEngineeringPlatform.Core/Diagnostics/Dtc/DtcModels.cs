@@ -95,5 +95,10 @@ public class DtcClearVerificationResult
     public List<string> PostClearRemainingCodes { get; set; } = new();
     public string? RawClearResponseHex { get; set; }
     public bool IsVerifiedCleared => Status == DtcClearStatus.Cleared && PostClearDtcCount == 0;
+    public bool ClearedSuccessfully => IsVerifiedCleared;
+    public List<string> ClearedCodes => PreClearCodes.Except(PostClearRemainingCodes).ToList();
+    public List<string> PersistingCodes => PostClearRemainingCodes;
+    public List<string> ReTriggeredCodes { get; set; } = new();
     public DateTime TimestampUtc { get; set; } = DateTime.UtcNow;
+    public DateTime VerifiedAtUtc => TimestampUtc;
 }

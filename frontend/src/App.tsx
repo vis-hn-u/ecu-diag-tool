@@ -23,6 +23,8 @@ import { ReportsPage } from './pages/ReportsPage';
 import { EcuEngineeringPage } from './pages/EcuEngineeringPage';
 import { SavvyCanAnalysisPage } from './pages/SavvyCanAnalysisPage';
 
+import { ErrorBoundary } from './components/ErrorBoundary';
+
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
   const [graphSignal, setGraphSignal] = useState<string | undefined>(undefined);
@@ -41,25 +43,27 @@ export const AppContent: React.FC = () => {
       <div className="flex flex-1 overflow-hidden">
         <Sidebar activeTab={activeTab} onSelectTab={setActiveTab} />
         <main className="flex-1 overflow-hidden bg-[#0A0E17]">
-          {activeTab === 'dashboard' && <DashboardPage onNavigate={setActiveTab} />}
-          {activeTab === 'ecu-engineering' && <EcuEngineeringPage />}
-          {activeTab === 'reports' && <ReportsPage />}
-          {activeTab === 'hardware' && <HardwareManagerPage />}
-          {activeTab === 'savvycan' && <SavvyCanAnalysisPage />}
-          {activeTab === 'analyzer' && <CanAnalyzerPage />}
-          {activeTab === 'live-ecu-data' && <LiveEcuDataPage />}
-          {activeTab === 'livedata' && <LiveDataPage onNavigateToGraphs={handleNavigateToGraphs} />}
-          {activeTab === 'topology' && <TopologyPage />}
-          {activeTab === 'dbc' && <DbcManagerPage />}
-          {activeTab === 'logger' && <LoggerPage onNavigateToReplay={() => setActiveTab('replay')} />}
-          {activeTab === 'replay' && <ReplayPage onNavigateToTopology={() => setActiveTab('topology')} />}
-          {activeTab === 'graphs' && <GraphsPage initialSignal={graphSignal} />}
-          {activeTab === 'diagnostics' && <DiagnosticsWorkspacePage />}
-          {activeTab === 'engine' && <EnginePage />}
-          {activeTab === 'dyno' && <DynoPage />}
-          {activeTab === 'calibration' && <CalibrationPage />}
-          {activeTab === 'flash-analyzer' && <FlashAnalyzerPage />}
-          {activeTab === 'mappacks' && <MappackViewerPage />}
+          <ErrorBoundary fallbackTitle={`${activeTab.toUpperCase()} Workspace Exception`}>
+            {activeTab === 'dashboard' && <DashboardPage onNavigate={setActiveTab} />}
+            {activeTab === 'ecu-engineering' && <EcuEngineeringPage />}
+            {activeTab === 'reports' && <ReportsPage />}
+            {activeTab === 'hardware' && <HardwareManagerPage />}
+            {activeTab === 'savvycan' && <SavvyCanAnalysisPage />}
+            {activeTab === 'analyzer' && <CanAnalyzerPage />}
+            {activeTab === 'live-ecu-data' && <LiveEcuDataPage />}
+            {activeTab === 'livedata' && <LiveDataPage onNavigateToGraphs={handleNavigateToGraphs} />}
+            {activeTab === 'topology' && <TopologyPage />}
+            {activeTab === 'dbc' && <DbcManagerPage />}
+            {activeTab === 'logger' && <LoggerPage onNavigateToReplay={() => setActiveTab('replay')} />}
+            {activeTab === 'replay' && <ReplayPage onNavigateToTopology={() => setActiveTab('topology')} />}
+            {activeTab === 'graphs' && <GraphsPage initialSignal={graphSignal} />}
+            {activeTab === 'diagnostics' && <DiagnosticsWorkspacePage />}
+            {activeTab === 'engine' && <EnginePage />}
+            {activeTab === 'dyno' && <DynoPage />}
+            {activeTab === 'calibration' && <CalibrationPage />}
+            {activeTab === 'flash-analyzer' && <FlashAnalyzerPage />}
+            {activeTab === 'mappacks' && <MappackViewerPage />}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

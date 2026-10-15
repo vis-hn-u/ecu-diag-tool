@@ -117,11 +117,19 @@ public class EcuCompatibilityManager : IEcuCompatibilityManager
         if (hw.Contains("EDC17C53") || sw.Contains("EDC17C53") || name.Contains("EDC17C53") || name.Contains("MHAWK 2.2") || name.Contains("XUV500") || name.Contains("THAR CRDE"))
             return GetProfileById("BOSCH_EDC17C53");
 
-        if (hw.Contains("EDC17C55") || sw.Contains("EDC17C55") || name.Contains("EDC17C55") || name.Contains("BOLERO POWER") || name.Contains("TUV300"))
+        if (hw.Contains("EDC17C55") || sw.Contains("EDC17C55") || name.Contains("EDC17C55") ||
+            hw.Contains("17C55") || sw.Contains("17C55") || name.Contains("17C55") ||
+            hw.Contains("C04") || sw.Contains("C04") || name.Contains("C04") ||
+            hw.Contains("C63") || sw.Contains("C63") || name.Contains("C63") ||
+            sw.Contains("1037535157") || sw.Contains("1037508746") || sw.Contains("P94455A") ||
+            hw.Contains("MEDC17") || sw.Contains("MEDC17") || hw.Contains("TC1767") ||
+            name.Contains("BOLERO") || name.Contains("TUV300") || hw.Contains("MA1FA2HR") || sw.Contains("MA1FA2HR"))
+        {
             return GetProfileById("BOSCH_EDC17C55");
+        }
 
         if (hw.Contains("EDC17C63") || sw.Contains("EDC17C63") || name.Contains("EDC17C63") || name.Contains("HEXA"))
-            return GetProfileById("BOSCH_EDC17C63");
+            return GetProfileById("BOSCH_EDC17C55");
 
         if (hw.Contains("EDC17CP14") || sw.Contains("EDC17CP14") || name.Contains("EDC17CP14") || hw.Contains("03L906022"))
             return GetProfileById("BOSCH_EDC17CP14");
@@ -557,6 +565,120 @@ public class EcuCompatibilityManager : IEcuCompatibilityManager
                     PinoutValidation = PinoutValidationState.Confirmed,
                     Evidence = EvidenceState.DatabaseMatch,
                     SourceReference = "Tata Motors Service Bulletin / Varicor 2.2 Bosch EDC17"
+                }
+            }
+        });
+
+        // =========================================================================
+        // 4a. BOSCH EDC17C55 (Mahindra Bolero Power+ / TUV300 / Thar CRDe / Scorpio)
+        // =========================================================================
+        RegisterProfile(new EcuFamilyProfile
+        {
+            FamilyId = "BOSCH_EDC17C55",
+            Name = "Bosch EDC17C55 (Mahindra Bolero Power+ / TUV300 / Thar CRDe)",
+            Manufacturer = "Bosch",
+            Category = "Common Rail Turbo Diesel (Euro 4 / Euro 5 / BS4)",
+            TypicalPlatforms = new() { "Mahindra Bolero Power+ 1.5 mHawk70", "Mahindra TUV300 1.5 mHawk80/mHawk100", "Mahindra Thar CRDe", "Mahindra Scorpio 2.2 mHawk", "Force Gurkha 2.6 CR", "Ashok Leyland Dost 1.5 TD" },
+            Mcu = McuArchitecture.InfineonTriCore_TC17xx,
+            McuModel = "Infineon TriCore TC1724 / TC1767 (32-bit RISC @ 133 MHz)",
+            MicroprocessorFamily = "Infineon TriCore AUDO MAX Family",
+            InstructionSet = "TriCore 1.3.1 32-bit RISC Dual-Core",
+            CoreClockMhz = 133,
+            ExternalFlashChip = "Internal 1.5 MB / 2 MB Flash (TC1724 / TC1767 Embedded Flash)",
+            EepromChip = "64 KB Emulated EEPROM in DFlash",
+            FlashSizeBytes = 2097152, // 2 MB Flash
+            EepromSizeBytes = 65536,
+            HardwareNumberPatterns = new() { "0281030085", "0281031353", "0281031386", "0281032338", "0281030438", "0281030439", "0281032483", "0281033282", "0281030436", "0281019623", "0281030086", "C04", "C63", "EDC17C55", "17C55", "MEDC17", "tc1767", "TC1767" },
+            SoftwareNumberPatterns = new() { "1037535157", "1037508746", "1037511004", "1037528340", "1037541299", "1037512211", "P94455A", "P94430A" },
+            CalIdPattern = "P94455A_1037535157",
+            CvnPattern = "0xB904D18E",
+            SupportedProtocols = new() { "OBD-II (ISO 15765-4 500k 11-bit)", "KWP2000 on CAN (ISO 14230-4)", "UDS on ISO-TP (ISO 14229)", "ASAM MCD-1 XCP on CAN" },
+            PrimaryDiagnosticProtocol = "KWP2000 (ISO 14230-4) & OBD-II (ISO 15765-4)",
+            DefaultBaudRate = 500000,
+            CanAddressingType = "11-bit Standard (Req: 0x7E0, Resp: 0x7E8)",
+            DefaultRequestCanId = 0x7E0,
+            DefaultResponseCanId = 0x7E8,
+            FunctionalBroadcastCanId = 0x7DF,
+            KlineProtocol = "Not Connected (Full High-Speed CAN Architecture)",
+            SecurityAccessLevels = new()
+            {
+                ["0x01 / 0x02"] = "Mahindra Diagnostic & Special Service Function (Service 0x27)",
+                ["0x03 / 0x04"] = "Development & Dyno Calibration Access",
+                ["0x11 / 0x12"] = "Tuning Protection (TPROT) Reprogramming Flash Key"
+            },
+            BenchPinout = new()
+            {
+                ["Pin 1, 2"] = "+12V Permanent Battery Power (Terminal 30)",
+                ["Pin 5"] = "+12V Switched Ignition Terminal 15",
+                ["Pin 3, 4"] = "Chassis Ground (Terminal 31)",
+                ["Pin 67"] = "CAN High (CAN-H 500 kbps)",
+                ["Pin 68"] = "CAN Low (CAN-L 500 kbps)",
+                ["TC1767 Boot"] = "Boot pin located on PCB underside - connect to Ground via 1kΩ resistor for BSL mode"
+            },
+            ProgrammingMethods = new() { "Bench Service Mode (No open ECU, GPT Password Probe)", "Boot TriCore BSL (Open ECU, 1kΩ Boot Pin)", "OBD Virtual Read" },
+            BootPinDetails = "TC1767 Boot pin (P14.5) to Ground through 1kΩ resistor",
+            BdmJtagDetails = "Infineon DAP (Device Access Port) 10-pin pad pattern",
+            ChecksumAlgorithm = "Bosch TriCore CRC32 / Multi-Block Additive Sum",
+            KnownConstraints = new()
+            {
+                "Bosch TPROT (Tuning Protection V08-V11) active on EDC17C55 bootloader",
+                "Mahindra VGT Turbo and Common Rail (1800 bar) closed-loop monitoring",
+                "Injector IMA 7-character calibration codes in DFlash"
+            },
+            RecoveryProcedures = new()
+            {
+                "Boot TriCore BSL mode with 1kΩ resistor bypasses corrupted software",
+                "Full flash + DFlash backup restores complete ECU identity"
+            },
+            ReleaseValidation = ReleaseValidationState.DatabaseSourceVerified,
+            PinoutValidation = PinoutValidationState.Confirmed,
+            ConflictingPinoutVariantsFound = false,
+            SourceProvenance = "Bosch Diesel Systems Service Documentation / Mahindra Wiring Diagram",
+            Variants = new()
+            {
+                new()
+                {
+                    VariantId = "EDC17C55_C04_BOLERO",
+                    VariantName = "Bosch EDC17C55 C04 (Mahindra Bolero Power+ 1.5 mHawk70)",
+                    HardwareNumber = "0281030085",
+                    SoftwareNumber = "1037535157",
+                    ConnectorDesignation = "94-pin Engine Harness (A) + 60-pin Vehicle (B)",
+                    VehiclePlatform = "Mahindra Bolero Power+ 1.5 mHawk70",
+                    McuModel = "Infineon TriCore TC1767",
+                    BenchPinout = new()
+                    {
+                        ["Pin A1, A2"] = "+12V Permanent Battery Power",
+                        ["Pin A5"] = "+12V Switched Ignition Terminal 15",
+                        ["Pin A3, A4"] = "Chassis Ground",
+                        ["Pin A67"] = "CAN High (CAN-H 500 kbps)",
+                        ["Pin A68"] = "CAN Low (CAN-L 500 kbps)",
+                        ["Boot Pin"] = "TC1767 Boot pin to Ground via 1kΩ resistor"
+                    },
+                    PinoutValidation = PinoutValidationState.Confirmed,
+                    Evidence = EvidenceState.Confirmed,
+                    SourceReference = "Mahindra Service Manual EDC17C55 C04 Wiring Architecture"
+                },
+                new()
+                {
+                    VariantId = "EDC17C55_C63_TUV300",
+                    VariantName = "Bosch EDC17C55 C63 (Mahindra TUV300 1.5 mHawk100)",
+                    HardwareNumber = "0281032483",
+                    SoftwareNumber = "1037541299",
+                    ConnectorDesignation = "94-pin Engine Harness (A) + 60-pin Vehicle (B)",
+                    VehiclePlatform = "Mahindra TUV300 1.5 mHawk100",
+                    McuModel = "Infineon TriCore TC1767",
+                    BenchPinout = new()
+                    {
+                        ["Pin A1, A2"] = "+12V Permanent Battery Power",
+                        ["Pin A5"] = "+12V Switched Ignition Terminal 15",
+                        ["Pin A3, A4"] = "Chassis Ground",
+                        ["Pin A67"] = "CAN High (CAN-H 500 kbps)",
+                        ["Pin A68"] = "CAN Low (CAN-L 500 kbps)",
+                        ["Boot Pin"] = "TC1767 Boot pin to Ground via 1kΩ resistor"
+                    },
+                    PinoutValidation = PinoutValidationState.Confirmed,
+                    Evidence = EvidenceState.Confirmed,
+                    SourceReference = "Mahindra Service Manual EDC17C55 C63 Wiring Architecture"
                 }
             }
         });

@@ -8,6 +8,8 @@ using CanEngineeringPlatform.Core.Diagnostics.Uds;
 using CanEngineeringPlatform.Core.EcuEngineering.Compatibility;
 using CanEngineeringPlatform.Core.EcuEngineering.Core;
 
+using CanEngineeringPlatform.Core.Hardware;
+
 namespace CanEngineeringPlatform.Core.EcuEngineering.Identification;
 
 public interface IEcuIdentificationService
@@ -21,18 +23,23 @@ public class EcuIdentificationService : IEcuIdentificationService
 {
     private readonly IDiagnosticSessionService _diagnosticSession;
     private readonly IEcuCompatibilityManager _compatibilityManager;
+    private readonly IHardwareManager? _hardwareManager;
     private readonly Dictionary<string, EcuIdentificationProfile> _profiles = new(StringComparer.OrdinalIgnoreCase);
 
     public EcuIdentificationService(
         IDiagnosticSessionService diagnosticSession,
-        IEcuCompatibilityManager compatibilityManager)
+        IEcuCompatibilityManager compatibilityManager,
+        IHardwareManager? hardwareManager = null)
     {
         _diagnosticSession = diagnosticSession ?? throw new ArgumentNullException(nameof(diagnosticSession));
         _compatibilityManager = compatibilityManager ?? throw new ArgumentNullException(nameof(compatibilityManager));
+        _hardwareManager = hardwareManager;
     }
 
     public async Task<EcuIdentificationProfile> IdentifyEcuAsync(uint requestCanId = 0x7E0, uint responseCanId = 0x7E8, string ecuName = "ECM")
     {
+        bool isSimulation = _hardwareManager == null || _hardwareManager.GetStatus()?.IsConnected != true;
+
         var profile = new EcuIdentificationProfile
         {
             EcuName = ecuName,
@@ -41,16 +48,6 @@ public class EcuIdentificationService : IEcuIdentificationService
             IdentificationTimestampUtc = DateTime.UtcNow
         };
 
-        // Standard UDS Identification DIDs (ISO 14229-1)
-        // 0xF190: VIN
-        // 0xF187: Spare Part Number
-        // 0xF191: ECU Hardware Number
-        // 0xF194: Software Number
-        // 0xF189: Software Version
-        // 0xF180: Boot Software ID
-        // 0xF18C: Serial Number
-        // 0xF19E: ASAM / ODX Name
-
         string? partNum = null;
         string? hwNum = null;
         string? swNum = null;
@@ -58,48 +55,150 @@ public class EcuIdentificationService : IEcuIdentificationService
         string? vin = null;
         string? bootVer = null;
 
-        // Query VIN (0xF190)
-        var vinResp = await QueryDidAsync(requestCanId, 0xF190, ecuName);
-        if (vinResp.Success && !string.IsNullOrWhiteSpace(vinResp.Text))
+        // Multi-protocol live discovery when hardware is connected
+        if (!isSimulation)
         {
-            vin = vinResp.Text.Trim();
-            var evidence = EvidenceSource.Create("UdsDid", "0xF190", "UDS ReadDataByIdentifier: Vehicle Identification Number", vinResp.RawHex);
-            profile.Vin = FieldWithConfidence<string>.Confirmed(vin, evidence);
-            profile.AllEvidence.Add(evidence);
+            // 1. Query VIN via OBD-II Mode 09 PID 02
+            try
+            {
+                var vinEx = await _diagnosticSession.SendRequestAsync(requestCanId, new byte[] { 0x09, 0x02 }, ecuName, isSimulation: false);
+                int wait = 0;
+                while (!vinEx.IsComplete && wait < 600) { await Task.Delay(20); wait += 20; }
+                if (vinEx.IsSuccess && vinEx.ResponseDataHex != null)
+                {
+                    byte[] raw = ParseHexBytes(vinEx.ResponseDataHex);
+                    if (raw.Length >= 4)
+                    {
+                        int offset = raw[2] == 0x01 ? 3 : 2;
+                        vin = CleanAscii(Encoding.ASCII.GetString(raw, offset, raw.Length - offset));
+                        if (!string.IsNullOrWhiteSpace(vin))
+                        {
+                            var evidence = EvidenceSource.Create("ObdMode09", "PID_0x02", "OBD-II Mode 09 Vehicle Identification Number (VIN)", vinEx.ResponseDataHex);
+                            profile.Vin = FieldWithConfidence<string>.Confirmed(vin, evidence);
+                            profile.AllEvidence.Add(evidence);
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            // 2. Query ECU Identification via KWP2000 Service 0x1A 0x80 (MEDC17 info)
+            try
+            {
+                await _diagnosticSession.SendRequestAsync(requestCanId, new byte[] { 0x10, 0x81 }, ecuName, isSimulation: false);
+                await Task.Delay(40);
+
+                var kwpEx = await _diagnosticSession.SendRequestAsync(requestCanId, new byte[] { 0x1A, 0x80 }, ecuName, isSimulation: false);
+                int wait = 0;
+                while (!kwpEx.IsComplete && wait < 800) { await Task.Delay(20); wait += 20; }
+                if (kwpEx.IsSuccess && kwpEx.ResponseDataHex != null)
+                {
+                    byte[] raw = ParseHexBytes(kwpEx.ResponseDataHex);
+                    string ascii = CleanAscii(Encoding.ASCII.GetString(raw));
+                    var evidence = EvidenceSource.Create("KWP2000", "0x1A_0x80", "KWP2000 ReadECUIdentification: Calibration & Mcu Parameters", kwpEx.ResponseDataHex);
+                    profile.AllEvidence.Add(evidence);
+
+                    var swMatch = System.Text.RegularExpressions.Regex.Match(ascii, @"1037\d{6}");
+                    if (swMatch.Success)
+                    {
+                        swNum = swMatch.Value;
+                        profile.SoftwareNumber = FieldWithConfidence<string>.Confirmed(swNum, evidence);
+                    }
+
+                    if (ascii.Contains("tc1767", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hwNum = "Infineon TriCore TC1767";
+                        profile.HardwareNumber = FieldWithConfidence<string>.Confirmed(hwNum, evidence);
+                    }
+                    else if (ascii.Contains("MEDC17", StringComparison.OrdinalIgnoreCase))
+                    {
+                        hwNum = "Bosch MEDC17 (EDC17C55)";
+                        profile.HardwareNumber = FieldWithConfidence<string>.Confirmed(hwNum, evidence);
+                    }
+                }
+            }
+            catch { }
+
+            // 3. Query ECU Name via OBD-II Mode 09 PID 0A
+            try
+            {
+                var nameEx = await _diagnosticSession.SendRequestAsync(requestCanId, new byte[] { 0x09, 0x0A }, ecuName, isSimulation: false);
+                int wait = 0;
+                while (!nameEx.IsComplete && wait < 600) { await Task.Delay(20); wait += 20; }
+                if (nameEx.IsSuccess && nameEx.ResponseDataHex != null)
+                {
+                    byte[] raw = ParseHexBytes(nameEx.ResponseDataHex);
+                    if (raw.Length >= 4)
+                    {
+                        int offset = raw[2] == 0x01 ? 3 : 2;
+                        string sysName = CleanAscii(Encoding.ASCII.GetString(raw, offset, raw.Length - offset));
+                        if (!string.IsNullOrWhiteSpace(sysName))
+                        {
+                            var evidence = EvidenceSource.Create("ObdMode09", "PID_0x0A", "OBD-II Mode 09 ECU Name", nameEx.ResponseDataHex);
+                            profile.EcuPartNumber = FieldWithConfidence<string>.Confirmed(sysName, evidence);
+                            profile.AllEvidence.Add(evidence);
+                        }
+                    }
+                }
+            }
+            catch { }
+        }
+
+        // Standard UDS Identification DIDs (ISO 14229-1)
+        // Query VIN (0xF190)
+        if (string.IsNullOrEmpty(vin))
+        {
+            var vinResp = await QueryDidAsync(requestCanId, 0xF190, ecuName, isSimulation);
+            if (vinResp.Success && !string.IsNullOrWhiteSpace(vinResp.Text))
+            {
+                vin = vinResp.Text.Trim();
+                var evidence = EvidenceSource.Create("UdsDid", "0xF190", "UDS ReadDataByIdentifier: Vehicle Identification Number", vinResp.RawHex);
+                profile.Vin = FieldWithConfidence<string>.Confirmed(vin, evidence);
+                profile.AllEvidence.Add(evidence);
+            }
         }
 
         // Query Part Number (0xF187)
-        var partResp = await QueryDidAsync(requestCanId, 0xF187, ecuName);
-        if (partResp.Success && !string.IsNullOrWhiteSpace(partResp.Text))
+        if (string.IsNullOrEmpty(partNum))
         {
-            partNum = partResp.Text.Trim();
-            var evidence = EvidenceSource.Create("UdsDid", "0xF187", "UDS ReadDataByIdentifier: Vehicle Manufacturer Spare Part Number", partResp.RawHex);
-            profile.EcuPartNumber = FieldWithConfidence<string>.Confirmed(partNum, evidence);
-            profile.AllEvidence.Add(evidence);
+            var partResp = await QueryDidAsync(requestCanId, 0xF187, ecuName, isSimulation);
+            if (partResp.Success && !string.IsNullOrWhiteSpace(partResp.Text))
+            {
+                partNum = partResp.Text.Trim();
+                var evidence = EvidenceSource.Create("UdsDid", "0xF187", "UDS ReadDataByIdentifier: Vehicle Manufacturer Spare Part Number", partResp.RawHex);
+                profile.EcuPartNumber = FieldWithConfidence<string>.Confirmed(partNum, evidence);
+                profile.AllEvidence.Add(evidence);
+            }
         }
 
         // Query Hardware Number (0xF191)
-        var hwResp = await QueryDidAsync(requestCanId, 0xF191, ecuName);
-        if (hwResp.Success && !string.IsNullOrWhiteSpace(hwResp.Text))
+        if (string.IsNullOrEmpty(hwNum))
         {
-            hwNum = hwResp.Text.Trim();
-            var evidence = EvidenceSource.Create("UdsDid", "0xF191", "UDS ReadDataByIdentifier: Vehicle Manufacturer ECU Hardware Number", hwResp.RawHex);
-            profile.HardwareNumber = FieldWithConfidence<string>.Confirmed(hwNum, evidence);
-            profile.AllEvidence.Add(evidence);
+            var hwResp = await QueryDidAsync(requestCanId, 0xF191, ecuName, isSimulation);
+            if (hwResp.Success && !string.IsNullOrWhiteSpace(hwResp.Text))
+            {
+                hwNum = hwResp.Text.Trim();
+                var evidence = EvidenceSource.Create("UdsDid", "0xF191", "UDS ReadDataByIdentifier: Vehicle Manufacturer ECU Hardware Number", hwResp.RawHex);
+                profile.HardwareNumber = FieldWithConfidence<string>.Confirmed(hwNum, evidence);
+                profile.AllEvidence.Add(evidence);
+            }
         }
 
         // Query Software Number (0xF194)
-        var swResp = await QueryDidAsync(requestCanId, 0xF194, ecuName);
-        if (swResp.Success && !string.IsNullOrWhiteSpace(swResp.Text))
+        if (string.IsNullOrEmpty(swNum))
         {
-            swNum = swResp.Text.Trim();
-            var evidence = EvidenceSource.Create("UdsDid", "0xF194", "UDS ReadDataByIdentifier: System Supplier ECU Software Number", swResp.RawHex);
-            profile.SoftwareNumber = FieldWithConfidence<string>.Confirmed(swNum, evidence);
-            profile.AllEvidence.Add(evidence);
+            var swResp = await QueryDidAsync(requestCanId, 0xF194, ecuName, isSimulation);
+            if (swResp.Success && !string.IsNullOrWhiteSpace(swResp.Text))
+            {
+                swNum = swResp.Text.Trim();
+                var evidence = EvidenceSource.Create("UdsDid", "0xF194", "UDS ReadDataByIdentifier: System Supplier ECU Software Number", swResp.RawHex);
+                profile.SoftwareNumber = FieldWithConfidence<string>.Confirmed(swNum, evidence);
+                profile.AllEvidence.Add(evidence);
+            }
         }
 
         // Query Software Version (0xF189)
-        var verResp = await QueryDidAsync(requestCanId, 0xF189, ecuName);
+        var verResp = await QueryDidAsync(requestCanId, 0xF189, ecuName, isSimulation);
         if (verResp.Success && !string.IsNullOrWhiteSpace(verResp.Text))
         {
             swVer = verResp.Text.Trim();
@@ -109,7 +208,7 @@ public class EcuIdentificationService : IEcuIdentificationService
         }
 
         // Query Bootloader Version (0xF180)
-        var bootResp = await QueryDidAsync(requestCanId, 0xF180, ecuName);
+        var bootResp = await QueryDidAsync(requestCanId, 0xF180, ecuName, isSimulation);
         if (bootResp.Success && !string.IsNullOrWhiteSpace(bootResp.Text))
         {
             bootVer = bootResp.Text.Trim();
@@ -234,16 +333,16 @@ public class EcuIdentificationService : IEcuIdentificationService
         return profile;
     }
 
-    private async Task<(bool Success, string Text, string RawHex)> QueryDidAsync(uint canId, ushort did, string ecuName)
+    private async Task<(bool Success, string Text, string RawHex)> QueryDidAsync(uint canId, ushort did, string ecuName, bool isSimulation = true)
     {
         byte[] request = new byte[] { 0x22, (byte)(did >> 8), (byte)(did & 0xFF) };
         try
         {
-            var exchange = await _diagnosticSession.SendRequestAsync(canId, request, ecuName, isSimulation: true);
+            var exchange = await _diagnosticSession.SendRequestAsync(canId, request, ecuName, isSimulation: isSimulation);
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            while (!exchange.IsComplete && sw.ElapsedMilliseconds < 250)
+            while (!exchange.IsComplete && sw.ElapsedMilliseconds < 500)
             {
-                await Task.Delay(10);
+                await Task.Delay(15);
             }
 
             if (exchange.IsSuccess && exchange.ResponseDataHex != null)
@@ -271,6 +370,21 @@ public class EcuIdentificationService : IEcuIdentificationService
             // Ignore failure, return empty
         }
         return (false, string.Empty, string.Empty);
+    }
+
+    private static byte[] ParseHexBytes(string hex)
+    {
+        if (string.IsNullOrWhiteSpace(hex)) return Array.Empty<byte>();
+        var parts = hex.Split(new[] { ' ', '-', ':' }, StringSplitOptions.RemoveEmptyEntries);
+        var bytes = new List<byte>(parts.Length);
+        foreach (var p in parts)
+        {
+            if (byte.TryParse(p, System.Globalization.NumberStyles.HexNumber, null, out byte b))
+            {
+                bytes.Add(b);
+            }
+        }
+        return bytes.ToArray();
     }
 
     private static string CleanAscii(string s)

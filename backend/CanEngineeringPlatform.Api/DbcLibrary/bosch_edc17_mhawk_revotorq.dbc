@@ -10,6 +10,13 @@ BO_ 288 Powertrain_0x120: 8 ECM
  SG_ EngineCrankStatus : 56|1@1+ (1,0) [0|1] "" CLUSTER
  SG_ IdleSpeedGovernorActive : 57|1@1+ (1,0) [0|1] "" CLUSTER
 
+BO_ 292 Engine_0x124: 8 ECM
+ SG_ EngineRPM : 0|16@1+ (0.25,0) [0|8000] "rpm" CLUSTER,ABS
+ SG_ ThrottlePosition : 16|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+ SG_ EngineTorque : 24|8@1+ (1,-100) [-100|400] "Nm" ABS
+ SG_ EngineStatus : 32|8@1+ (1,0) [0|255] "" CLUSTER
+ SG_ AcceleratorPedal : 40|8@1+ (0.392157,0) [0|100] "%" CLUSTER
+
 BO_ 784 VehicleDynamics_0x310: 8 ABS
  SG_ VehicleSpeed : 0|16@1+ (0.01,0) [0|250] "km/h" ECM,CLUSTER
  SG_ WheelSpeedFL : 16|16@1+ (0.01,0) [0|250] "km/h" CLUSTER

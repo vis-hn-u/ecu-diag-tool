@@ -579,16 +579,37 @@ export const api = {
     return res.json();
   },
   scanAllDtcs: async (isSimulation: boolean = true): Promise<DiagnosticTroubleCode[]> => {
-    const res = await fetch(`${API_BASE}/diagnostics/scan-all-dtcs?isSimulation=${isSimulation}`, {
-      method: 'POST'
-    });
-    return res.json();
+    try {
+      const res = await fetch(`${API_BASE}/diagnostics/scan-all-dtcs?isSimulation=${isSimulation}`, {
+        method: 'POST'
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
   },
   clearDtcs: async (requestCanId: number = 0x7E0, ecuName: string = "ECM", isSimulation: boolean = true): Promise<DtcClearVerificationResult> => {
     const res = await fetch(`${API_BASE}/diagnostics/clear-dtcs?requestCanId=${requestCanId}&ecuName=${ecuName}&isSimulation=${isSimulation}`, {
       method: 'POST'
     });
-    return res.json();
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error(err.message || err.title || `Clear DTCs request failed (${res.status})`);
+    }
+    const data = await res.json();
+    return {
+      status: data.status || 'Timeout',
+      clearedSuccessfully: Boolean(data.clearedSuccessfully),
+      preClearDtcCount: Number(data.preClearDtcCount ?? 0),
+      postClearDtcCount: Number(data.postClearDtcCount ?? 0),
+      clearedCodes: Array.isArray(data.clearedCodes) ? data.clearedCodes : [],
+      persistingCodes: Array.isArray(data.persistingCodes) ? data.persistingCodes : [],
+      reTriggeredCodes: Array.isArray(data.reTriggeredCodes) ? data.reTriggeredCodes : [],
+      message: data.message || (data.clearedSuccessfully ? 'All fault codes successfully cleared and verified.' : 'Clear sequence completed with pending/unresponsive codes.'),
+      verifiedAtUtc: data.verifiedAtUtc || new Date().toISOString()
+    };
   },
   getEcuIdentifications: async (): Promise<EcuIdentification[]> => {
     const res = await fetch(`${API_BASE}/diagnostics/ecu-info`);

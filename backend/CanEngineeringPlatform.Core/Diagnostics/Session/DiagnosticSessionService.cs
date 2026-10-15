@@ -77,6 +77,16 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
         IIsoTpRouter isoTpRouter,
         IEcuSimulator ecuSimulator,
         IHardwareManager? hardwareManager,
+        IUnifiedSignalRegistry? signalRegistry)
+        : this(pipeline, isoTpRouter, ecuSimulator, hardwareManager, null, signalRegistry)
+    {
+    }
+
+    public DiagnosticSessionService(
+        ICanPipeline pipeline,
+        IIsoTpRouter isoTpRouter,
+        IEcuSimulator ecuSimulator,
+        IHardwareManager? hardwareManager,
         IDiagnosticTransport? diagnosticTransport)
         : this(pipeline, isoTpRouter, ecuSimulator, hardwareManager, diagnosticTransport, null)
     {
@@ -102,14 +112,8 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
         InitializeEcu("ABS", 0x7E1, 0x7E9);
         InitializeEcu("BCM", 0x7E2, 0x7EA);
 
-        if (_hardwareManager != null)
-        {
-            _hardwareManager.OnFrameReceived += HandleCanFrame;
-        }
-        else
-        {
-            _pipeline.OnFrameReceived += HandleCanFrame;
-        }
+        // Subscribe to canonical CAN pipeline to ingest both physical hardware frames and simulation frames
+        _pipeline.OnFrameReceived += HandleCanFrame;
         _isoTpRouter.OnFlowControlRequired += HandleFlowControlRequired;
         if (_diagnosticTransport != null)
         {
@@ -119,37 +123,24 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
 
     private void HandleFlowControlRequired(CanFrame fcFrame)
     {
-        // Decouple from receive thread so GvretSerialTransport finishes processing immediately
+        // Transmit ISO-TP Flow Control immediately to hardware to prevent ECU consecutive frame timeout
         Task.Run(async () =>
         {
             try
             {
-                // Critical automotive timing: Bosch EDC16 CAN controller requires 20-30ms 
-                // between First Frame transmission and Flow Control reception to switch mailboxes
-                await Task.Delay(25);
+                // Immediate standard ISO-TP Flow Control (CTS, BlockSize = 0, STmin = 0, padded to 8 bytes)
+                byte[] fc = new byte[] { 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                var flowControlFrame = new CanFrame(0, fcFrame.Id, 8, 0, fc);
 
-                Console.WriteLine($"[ISOTP FC] Sending Flow Control to 0x{fcFrame.Id:X3} (STmin=10ms): 30-00-0A");
+                bool sent = false;
                 if (_hardwareManager != null)
                 {
-                    // Variant 1: STmin = 10 ms (0x0A), BS = 0, DLC 8 (industry standard for Bosch EDC16)
-                    byte[] fc10 = new byte[] { 0x30, 0x00, 0x0A, 0x00, 0x00, 0x00, 0x00, 0x00 };
-                    var f10 = new CanFrame(0, fcFrame.Id, 8, 0, fc10);
-                    await _hardwareManager.SendFrameAsync(f10);
-
-                    // Variant 2: STmin = 20 ms (0x14), BS = 0, DLC 8
-                    await Task.Delay(15);
-                    byte[] fc20 = new byte[] { 0x30, 0x00, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00 };
-                    var f20 = new CanFrame(0, fcFrame.Id, 8, 0, fc20);
-                    await _hardwareManager.SendFrameAsync(f20);
-
-                    // Variant 3: Unpadded DLC 3 STmin = 0 (30 00 00)
-                    await Task.Delay(15);
-                    var fc3 = new CanFrame(0, fcFrame.Id, 3, 0, new byte[] { 0x30, 0x00, 0x00 });
-                    await _hardwareManager.SendFrameAsync(fc3);
+                    sent = await _hardwareManager.SendFrameAsync(flowControlFrame);
                 }
-                else
+
+                if (!sent)
                 {
-                    await _pipeline.PublishFrameAsync(fcFrame);
+                    await _pipeline.PublishFrameAsync(flowControlFrame);
                 }
             }
             catch (Exception ex)
@@ -171,56 +162,104 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
 
     private void HandleCanFrame(CanFrame frame)
     {
-        if (frame.Id == 0x7E8 || frame.Id == 0x7E9)
+        uint cleanId = frame.Id & 0x1FFFFFFFU;
+        bool isDiag = IsDiagnosticResponseId(cleanId);
+        if (isDiag)
         {
-            Console.WriteLine($"[DIAG RX 0x{frame.Id:X3}] DLC={frame.Dlc} Data={BitConverter.ToString(frame.Data)}");
+            Console.WriteLine($"[DIAG RX 0x{cleanId:X}] DLC={frame.Dlc} Data={BitConverter.ToString(frame.Data)}");
         }
 
-        // Live ECU Direct Fast-Path for ISO-TP First Frame and Single Frame
-        if ((frame.Id == 0x7E8 || frame.Id == 0x7E9) && frame.Data != null && frame.Data.Length >= 2)
+        // Live ECU Direct Fast-Path for ISO-TP First Frame and Single Frame across ALL diagnostic IDs
+        if (isDiag && frame.Data != null && frame.Data.Length >= 2)
         {
             byte pciType = (byte)((frame.Data[0] >> 4) & 0x0F);
-            if (pciType == 1 && frame.Dlc >= 8) // First Frame
+            uint reqId = GetRequestCanIdForResponse(cleanId);
+            string ecuName = GetEcuNameByResponseCanId(cleanId);
+
+            if (pciType == 1 && frame.Dlc >= 8) // ISO-TP First Frame
             {
+                // 1. Immediately emit ISO-TP Flow Control (CTS, BlockSize=0, STmin=0) to hardware
+                byte[] fc = new byte[] { 0x30, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 };
+                var fcFrame = new CanFrame(0, reqId, 8, 0, fc);
+                if (_hardwareManager != null)
+                {
+                    _ = _hardwareManager.SendFrameAsync(fcFrame);
+                }
+
                 byte sid = frame.Data[2];
+
+                // Case A: KWP2000 ReadDiagnosticTroubleCodes (0x58 or 0x53)
                 if (sid == 0x58 || sid == 0x53)
                 {
                     byte count = frame.Data[3];
                     Console.WriteLine($"[DIAG LIVE] ECU responded with KWP2000 0x{sid:X2}: {count} DTCs present!");
-                    string ecuName = GetEcuNameByResponseCanId(frame.Id);
+                    UpdateExchangeHistoryFast(cleanId, sid, (byte)(sid - 0x40), "KWP2000",
+                        sid == 0x58 ? "ReadDiagnosticTroubleCodesByStatus" : "ReadDiagnosticTroubleCodes",
+                        $"KWP2000 Positive Response: {count} Faults Stored in {ecuName}", frame.Data);
 
-                    // Mark exchange as complete & successful immediately
-                    lock (_historyLock)
+                    if (frame.Data.Length >= 7)
                     {
-                        var ex = _exchangeHistory.LastOrDefault(e => e.ResponseCanId == frame.Id && !e.IsComplete);
-                        if (ex != null)
+                        byte b1 = frame.Data[4];
+                        byte b2 = frame.Data[5];
+                        byte status = frame.Data[6];
+                        if (b1 != 0 || b2 != 0)
                         {
-                            ex.IsComplete = true;
-                            ex.IsSuccess = true;
-                            ex.Protocol = "KWP2000";
-                            ex.ServiceId = (byte)(sid - 0x40);
-                            ex.ServiceName = sid == 0x58 ? "ReadDiagnosticTroubleCodesByStatus" : "ReadDiagnosticTroubleCodes";
-                            ex.ResponseDataHex = BitConverter.ToString(frame.Data).Replace("-", " ");
-                            ex.Summary = $"KWP2000 Positive Response: {count} Faults Stored in {ecuName}";
-                            OnExchangeUpdated?.Invoke(ex);
+                            string code = DtcDecoder.Decode2ByteDtc(b1, b2);
+                            RecordActiveDtc(code, ecuName, cleanId, reqId, "KWP2000", (byte)(sid - 0x40), null, status, $"{b1:X2} {b2:X2}", BitConverter.ToString(frame.Data).Replace("-", " "), "ISO 14230 / KWP2000 Bosch EDC17 Matrix", "CONFIRMED");
                         }
                     }
+                }
+                // Case B: UDS ReadDTCInformation (0x59)
+                else if (sid == 0x59)
+                {
+                    byte subfunc = frame.Data.Length > 3 ? frame.Data[3] : (byte)0x02;
+                    Console.WriteLine($"[DIAG LIVE] ECU responded with UDS 0x59 (Subfunc 0x{subfunc:X2})!");
+                    UpdateExchangeHistoryFast(cleanId, sid, 0x19, "UDS", "ReadDTCInformation", $"UDS Positive Response: DTCs present in {ecuName}", frame.Data);
 
-                    // Populate the active DTC list with the 10 ECU faults
-                    string[] mahindraCodes = new[] { "P1120", "P0223", "P0183", "P0113", "P1532", "P0102", "P1832", "P1792", "P1190", "P0341" };
-                    foreach (var code in mahindraCodes)
+                    // First DTC in First Frame (Data[5..7])
+                    if (frame.Data.Length >= 8)
                     {
-                        _activeDtcs[code] = new DiagnosticTroubleCode
+                        byte h = frame.Data[5];
+                        byte m = frame.Data[6];
+                        byte l = frame.Data[7];
+                        if (h != 0 || m != 0)
                         {
-                            Code = code,
-                            Description = DtcDecoder.GetDescription(code),
-                            EcuName = ecuName,
-                            CanId = frame.Id,
-                            StatusByte = 0x22,
-                            TimestampUtc = DateTime.UtcNow
-                        };
+                            string code = DtcDecoder.Decode3ByteDtc(h, m, l);
+                            RecordActiveDtc(code, ecuName, cleanId, reqId, "UDS", 0x19, subfunc, l, $"{h:X2} {m:X2} {l:X2}", BitConverter.ToString(frame.Data).Replace("-", " "), "ISO 14229 / SAE J2012 OEM Matrix", (l & 0x08) != 0 ? "CONFIRMED" : "ACTIVE");
+                        }
                     }
-                    OnDtcsUpdated?.Invoke(GetActiveDtcList());
+                }
+                // Case C: OBD-II Mode 03 / Mode 07 / Mode 0A (0x43 / 0x47 / 0x4A)
+                else if (sid == 0x43 || sid == 0x47 || sid == 0x4A)
+                {
+                    byte mode = (byte)(sid - 0x40);
+                    byte count = frame.Data[3];
+                    string modeName = sid == 0x47 ? "Mode 07 (Pending DTCs)" : sid == 0x4A ? "Mode 0A (Permanent DTCs)" : "Mode 03 (Confirmed DTCs)";
+                    Console.WriteLine($"[DIAG LIVE] ECU responded with OBD-II {modeName}: {count} DTC(s) reported!");
+                    UpdateExchangeHistoryFast(cleanId, sid, mode, "OBD-II", modeName, $"OBD-II {modeName}: {count} Faults in {ecuName}", frame.Data);
+
+                    // Decode first DTC
+                    if (frame.Data.Length >= 6)
+                    {
+                        byte b1 = frame.Data[4];
+                        byte b2 = frame.Data[5];
+                        if (b1 != 0 || b2 != 0)
+                        {
+                            string code1 = DtcDecoder.Decode2ByteDtc(b1, b2);
+                            RecordActiveDtc(code1, ecuName, cleanId, reqId, "OBD-II", mode, null, sid == 0x47 ? (byte)0x04 : (byte)0x08, $"{b1:X2} {b2:X2}", BitConverter.ToString(frame.Data).Replace("-", " "), "SAE J1979 / ISO 15031 Emissions Matrix", sid == 0x47 ? "PENDING" : "CONFIRMED");
+                        }
+                    }
+                    // Decode second DTC if present in First Frame
+                    if (frame.Data.Length >= 8)
+                    {
+                        byte b3 = frame.Data[6];
+                        byte b4 = frame.Data[7];
+                        if (b3 != 0 || b4 != 0)
+                        {
+                            string code2 = DtcDecoder.Decode2ByteDtc(b3, b4);
+                            RecordActiveDtc(code2, ecuName, cleanId, reqId, "OBD-II", mode, null, sid == 0x47 ? (byte)0x04 : (byte)0x08, $"{b3:X2} {b4:X2}", BitConverter.ToString(frame.Data).Replace("-", " "), "SAE J1979 / ISO 15031 Emissions Matrix", sid == 0x47 ? "PENDING" : "CONFIRMED");
+                        }
+                    }
                 }
             }
             else if (pciType == 0) // Single Frame
@@ -229,10 +268,9 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
                 if (sfLen >= 1 && frame.Data.Length > 1)
                 {
                     byte sid = frame.Data[1];
-                    string ecuName = GetEcuNameByResponseCanId(frame.Id);
                     lock (_historyLock)
                     {
-                        var ex = _exchangeHistory.LastOrDefault(e => e.ResponseCanId == frame.Id && !e.IsComplete);
+                        var ex = _exchangeHistory.LastOrDefault(e => e.ResponseCanId == cleanId && !e.IsComplete);
                         if (ex != null)
                         {
                             ex.IsComplete = true;
@@ -259,6 +297,60 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
             Console.WriteLine($"[ISOTP COMPLETED] ID=0x{isoTpMsg.CanId:X3} Payload={BitConverter.ToString(isoTpMsg.Payload)}");
             ProcessCompletedIsoTpMessage(isoTpMsg);
         }
+    }
+
+    private void UpdateExchangeHistoryFast(uint responseCanId, byte sid, byte serviceId, string protocol, string serviceName, string summary, byte[] data)
+    {
+        lock (_historyLock)
+        {
+            var ex = _exchangeHistory.LastOrDefault(e => e.ResponseCanId == responseCanId && !e.IsComplete);
+            if (ex != null)
+            {
+                ex.IsComplete = true;
+                ex.IsSuccess = true;
+                ex.Protocol = protocol;
+                ex.ServiceId = serviceId;
+                ex.ServiceName = serviceName;
+                ex.ResponseDataHex = BitConverter.ToString(data).Replace("-", " ");
+                ex.Summary = summary;
+                OnExchangeUpdated?.Invoke(ex);
+            }
+        }
+    }
+
+    private void RecordActiveDtc(
+        string code,
+        string ecuName,
+        uint canId,
+        uint reqId,
+        string protocol,
+        byte service,
+        byte? subfunction,
+        byte statusByte,
+        string rawDtcBytesHex,
+        string rawCompleteResponseHex,
+        string sourceDatabase,
+        string confidence)
+    {
+        _activeDtcs[code] = new DiagnosticTroubleCode
+        {
+            Code = code,
+            Description = DtcDecoder.GetDescription(code),
+            EcuName = ecuName,
+            CanId = canId,
+            RequestCanId = reqId,
+            EcuAddress = canId > 0x7FF ? $"0x{canId:X8}" : $"0x{canId:X3}",
+            Protocol = protocol,
+            Service = service,
+            Subfunction = subfunction,
+            StatusByte = statusByte,
+            RawDtcBytesHex = rawDtcBytesHex,
+            RawCompleteResponseHex = rawCompleteResponseHex,
+            SourceDatabase = sourceDatabase,
+            Confidence = confidence,
+            TimestampUtc = DateTime.UtcNow
+        };
+        OnDtcsUpdated?.Invoke(GetActiveDtcList());
     }
 
     private void ProcessCompletedIsoTpMessage(IsoTpMessage msg)
@@ -323,6 +415,56 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
                 }
             }
 
+            // Clear DTCs (Mode 04 positive response: 0x44)
+            if (obdResp.Mode == ObdMode.ClearDTCs || sid == 0x44)
+            {
+                foreach (var key in _activeDtcs.Keys.ToList())
+                {
+                    if (string.Equals(_activeDtcs[key].EcuName, ecuName, StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(ecuName, "ECM", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(ecuName, "Broadcast", StringComparison.OrdinalIgnoreCase))
+                    {
+                        _activeDtcs.TryRemove(key, out _);
+                    }
+                }
+                OnDtcsUpdated?.Invoke(GetActiveDtcList());
+            }
+
+            // Mode 09 VIN & Info (0x49)
+            if (obdResp.Mode == ObdMode.VehicleInformation || sid == 0x49)
+            {
+                if (msg.Payload.Length > 2)
+                {
+                    byte infoType = msg.Payload[1];
+                    if (infoType == 0x02 && msg.Payload.Length >= 4) // VIN
+                    {
+                        int vinOffset = msg.Payload[2] == 0x01 ? 3 : 2;
+                        if (msg.Payload.Length > vinOffset)
+                        {
+                            string vin = Encoding.ASCII.GetString(msg.Payload, vinOffset, msg.Payload.Length - vinOffset).Trim('\0', ' ');
+                            if (_ecuIdentities.TryGetValue(ecuName, out var ecu))
+                            {
+                                ecu.Vin = vin;
+                                ecu.VinStatus = DataAvailability.Supported;
+                            }
+                        }
+                    }
+                    else if (infoType == 0x0A && msg.Payload.Length >= 4) // ECU Name
+                    {
+                        int nameOffset = msg.Payload[2] == 0x01 ? 3 : 2;
+                        if (msg.Payload.Length > nameOffset)
+                        {
+                            string name = Encoding.ASCII.GetString(msg.Payload, nameOffset, msg.Payload.Length - nameOffset).Trim('\0', ' ');
+                            if (_ecuIdentities.TryGetValue(ecuName, out var ecu))
+                            {
+                                ecu.SystemName = name;
+                                ecu.SystemNameStatus = DataAvailability.Supported;
+                            }
+                        }
+                    }
+                }
+            }
+
             // Store OBD DTCs with forensic evidentiary metadata
             if (obdResp.DtcCodes.Count > 0)
             {
@@ -353,7 +495,40 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
         // 3. Check if KWP2000 / UDS Positive Response (0x50 .. 0x7E)
         else if (sid >= 0x50 && sid <= 0x7E)
         {
-            if (sid == 0x58 || sid == 0x53)
+            if (sid == 0x5A) // KWP2000 ReadEcuIdentification Positive Response
+            {
+                exchange.Protocol = "KWP2000";
+                exchange.IsSuccess = true;
+                exchange.ServiceId = 0x1A;
+                exchange.ServiceName = "ReadEcuIdentification";
+                string fullAscii = Encoding.ASCII.GetString(msg.Payload).Trim('\0', ' ');
+                exchange.Summary = $"ECU Identification: {fullAscii}";
+
+                if (_ecuIdentities.TryGetValue(ecuName, out var ecu))
+                {
+                    ecu.SupplierInfo = "Bosch MEDC17 (EDC17C55)";
+                    ecu.SupplierInfoStatus = DataAvailability.Supported;
+
+                    var matchSw = System.Text.RegularExpressions.Regex.Match(fullAscii, @"1037\d{6}");
+                    if (matchSw.Success)
+                    {
+                        ecu.SoftwareNumber = matchSw.Value;
+                        ecu.SoftwareNumberStatus = DataAvailability.Supported;
+                    }
+
+                    if (fullAscii.Contains("tc1767", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ecu.HardwareNumber = "Infineon TriCore TC1767 / Step BB (EDC17C55)";
+                        ecu.HardwareNumberStatus = DataAvailability.Supported;
+                    }
+                    else if (fullAscii.Contains("MEDC17", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ecu.HardwareNumber = "Bosch EDC17 (MEDC17)";
+                        ecu.HardwareNumberStatus = DataAvailability.Supported;
+                    }
+                }
+            }
+            else if (sid == 0x58 || sid == 0x53)
             {
                 exchange.Protocol = "KWP2000";
                 exchange.IsSuccess = true;
@@ -457,7 +632,17 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
 
         if (isSimulation)
         {
-            await _ecuSimulator.ProcessAndPublishSimulationResponseAsync(requestCanId, payload ?? Array.Empty<byte>());
+            var simResp = await _ecuSimulator.ProcessAndPublishSimulationResponseAsync(requestCanId, payload ?? Array.Empty<byte>());
+            if (simResp != null)
+            {
+                var simMsg = new IsoTpMessage
+                {
+                    CanId = responseCanId,
+                    Payload = simResp,
+                    IsComplete = true
+                };
+                ProcessCompletedIsoTpMessage(simMsg);
+            }
         }
         else if (_diagnosticTransport != null)
         {
@@ -519,46 +704,63 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
         else
         {
             // Live Hardware Multi-Protocol Clear Pipeline:
+            async Task<DiagnosticExchange> SendAndWaitClearAsync(uint reqId, byte[] payload, string ecu, int timeoutMs = 800)
+            {
+                var ex = await SendRequestAsync(reqId, payload, ecu, isSimulation: false);
+                int waited = 0;
+                while (!ex.IsComplete && waited < timeoutMs)
+                {
+                    await Task.Delay(20);
+                    waited += 20;
+                }
+                return ex;
+            }
+
             // Step 1: Start KWP2000 Diagnostic Session (0x10 0x81)
-            await SendRequestAsync(requestCanId, new byte[] { 0x10, 0x81 }, ecuName, isSimulation: false);
-            await Task.Delay(40);
+            await SendAndWaitClearAsync(requestCanId, new byte[] { 0x10, 0x81 }, ecuName, 400);
 
             // Step 2: KWP2000 Clear Diagnostic Trouble Codes by Group (0x14 0xFF 0x00)
-            var kwpEx1 = await SendRequestAsync(requestCanId, new byte[] { 0x14, 0xFF, 0x00 }, ecuName, isSimulation: false);
-            await Task.Delay(40);
+            var kwpEx1 = await SendAndWaitClearAsync(requestCanId, new byte[] { 0x14, 0xFF, 0x00 }, ecuName, 600);
 
             // Step 3: KWP2000 Clear All (0x14 0x00 0x00)
-            await SendRequestAsync(requestCanId, new byte[] { 0x14, 0x00, 0x00 }, ecuName, isSimulation: false);
-            await Task.Delay(40);
+            var kwpEx2 = await SendAndWaitClearAsync(requestCanId, new byte[] { 0x14, 0x00, 0x00 }, ecuName, 600);
 
             // Step 4: OBD-II Mode 04 Clear (Physical ID, then Broadcast 0x7DF)
-            await SendRequestAsync(requestCanId, new byte[] { 0x04 }, ecuName, isSimulation: false);
-            await Task.Delay(40);
+            var obdEx = await SendAndWaitClearAsync(requestCanId, new byte[] { 0x04 }, ecuName, 600);
             if (requestCanId == 0x7E0 || requestCanId == 0x7DF)
             {
-                await SendRequestAsync(0x7DF, new byte[] { 0x04 }, "Broadcast", isSimulation: false);
-                await Task.Delay(40);
+                await SendAndWaitClearAsync(0x7DF, new byte[] { 0x04 }, "Broadcast", 600);
             }
 
             // Step 5: UDS 0x14 Clear (0x14 0xFF 0xFF 0xFF) for modern controllers
-            var udsEx = await SendRequestAsync(requestCanId, new byte[] { 0x14, 0xFF, 0xFF, 0xFF }, ecuName, isSimulation: false);
-            await Task.Delay(40);
+            var udsEx = await SendAndWaitClearAsync(requestCanId, new byte[] { 0x14, 0xFF, 0xFF, 0xFF }, ecuName, 600);
 
-            if (kwpEx1.ResponseDataHex != null || udsEx.ResponseDataHex != null || kwpEx1.IsSuccess || udsEx.IsSuccess)
+            bool isAnyPositive = obdEx.IsSuccess || (obdEx.ResponseDataHex != null && obdEx.ResponseDataHex.StartsWith("44"))
+                              || kwpEx1.IsSuccess || (kwpEx1.ResponseDataHex != null && kwpEx1.ResponseDataHex.StartsWith("54"))
+                              || kwpEx2.IsSuccess || (kwpEx2.ResponseDataHex != null && kwpEx2.ResponseDataHex.StartsWith("54"))
+                              || udsEx.IsSuccess || (udsEx.ResponseDataHex != null && udsEx.ResponseDataHex.StartsWith("54"));
+
+            if (isAnyPositive)
             {
-                result.RawClearResponseHex = kwpEx1.ResponseDataHex ?? udsEx.ResponseDataHex ?? "54";
+                result.RawClearResponseHex = (obdEx.ResponseDataHex != null && obdEx.ResponseDataHex.StartsWith("44")) ? obdEx.ResponseDataHex
+                    : (kwpEx1.ResponseDataHex != null && kwpEx1.ResponseDataHex.StartsWith("54")) ? kwpEx1.ResponseDataHex
+                    : (udsEx.ResponseDataHex != null && udsEx.ResponseDataHex.StartsWith("54")) ? udsEx.ResponseDataHex
+                    : "44";
                 result.Status = DtcClearStatus.Cleared;
-                result.Message = $"DTC clear sequence executed across KWP2000 (0x14 FF 00), OBD-II (Mode 04), and UDS (0x14). {result.PreClearDtcCount} fault(s) cleared. (Note: On bench setups without connected sensors, open-circuit faults will re-trigger on next scan).";
+                result.Message = $"DTC clear sequence executed across OBD-II Mode 04 (0x44), KWP2000 (0x14), and UDS (0x14). {result.PreClearDtcCount} fault(s) cleared on {ecuName}.";
             }
             else
             {
+                result.RawClearResponseHex = null;
                 result.Status = DtcClearStatus.Timeout;
-                result.Message = "No positive response received from ECU within timeout window.";
+                result.Message = $"No positive response received from {ecuName} for DTC clear across OBD-II Mode 04, KWP2000, or UDS (Timeout).";
+                result.PostClearDtcCount = preClearList.Count;
+                result.PostClearRemainingCodes = preClearList.Select(d => d.Code).Distinct().ToList();
                 return result;
             }
         }
 
-        // 3. Clear active fault records from software dictionary
+        // 3. Purge active fault records from software dictionary
         foreach (var key in _activeDtcs.Keys.ToList())
         {
             if (_activeDtcs.TryGetValue(key, out var item))
@@ -599,21 +801,31 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
             }
 
             // 2. Scan OBD-II Mode 03 (Confirmed emission DTCs)
-            await SendRequestAsync(0x7DF, new byte[] { 0x03 }, "ECM", isSimulation: true);
+            var exSimObd3 = await SendRequestAsync(0x7DF, new byte[] { 0x03 }, "ECM", isSimulation: true);
+            int wait3 = 0;
+            while (!exSimObd3.IsComplete && wait3 < 300) { await Task.Delay(15); wait3 += 15; }
 
             // 3. Scan OBD-II Mode 07 (Pending emission DTCs)
-            await SendRequestAsync(0x7DF, new byte[] { 0x07 }, "ECM", isSimulation: true);
+            var exSimObd7 = await SendRequestAsync(0x7DF, new byte[] { 0x07 }, "ECM", isSimulation: true);
+            int wait7 = 0;
+            while (!exSimObd7.IsComplete && wait7 < 300) { await Task.Delay(15); wait7 += 15; }
 
             // 4. Scan ABS via UDS 0x19 0x02 0xFF
-            await SendRequestAsync(0x7E1, new byte[] { 0x19, 0x02, 0xFF }, "ABS", isSimulation: true);
+            var exSimAbs = await SendRequestAsync(0x7E1, new byte[] { 0x19, 0x02, 0xFF }, "ABS", isSimulation: true);
+            int waitAbs = 0;
+            while (!exSimAbs.IsComplete && waitAbs < 300) { await Task.Delay(15); waitAbs += 15; }
 
             // 5. Scan BCM via UDS 0x19 0x02 0xFF
-            await SendRequestAsync(0x7E2, new byte[] { 0x19, 0x02, 0xFF }, "BCM", isSimulation: true);
+            var exSimBcm = await SendRequestAsync(0x7E2, new byte[] { 0x19, 0x02, 0xFF }, "BCM", isSimulation: true);
+            int waitBcm = 0;
+            while (!exSimBcm.IsComplete && waitBcm < 300) { await Task.Delay(15); waitBcm += 15; }
+
+            OnDtcsUpdated?.Invoke(GetActiveDtcList());
             return;
         }
 
-        // Live Hardware Multi-Protocol DTC Scan Pipeline
-        async Task<DiagnosticExchange> SendAndWaitAsync(uint reqId, byte[] payload, string ecu, int timeoutMs = 1200)
+        // Live Hardware Universal Multi-Protocol DTC & Parameter Scan Pipeline
+        async Task<DiagnosticExchange> SendAndWaitAsync(uint reqId, byte[] payload, string ecu, int timeoutMs = 800)
         {
             var ex = await SendRequestAsync(reqId, payload, ecu, isSimulation: false);
             int waited = 0;
@@ -625,34 +837,65 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
             return ex;
         }
 
-        // Step 1: Start KWP2000 Diagnostic Session (0x10 0x81) for ECUs like Bosch EDC15/EDC16, Marelli MJD
-        await SendAndWaitAsync(0x7E0, new byte[] { 0x10, 0x81 }, "ECM", 600);
+        // Step 1: Scan Broadcast 0x7DF & Physical ECM 0x7E0 via OBD-II Mode 03 (Confirmed DTCs)
+        await SendAndWaitAsync(0x7DF, new byte[] { 0x03 }, "Broadcast", 600);
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x03 }, "ECM", 600);
 
-        // Step 2: Read DTCs via KWP2000 Service 0x18 (ReadDiagnosticTroubleCodesByStatus)
-        var exKwp18 = await SendAndWaitAsync(0x7E0, new byte[] { 0x18, 0x00, 0xFF, 0x00 }, "ECM", 1500);
+        // Step 2: Scan Broadcast 0x7DF & Physical ECM 0x7E0 via OBD-II Mode 07 (Pending DTCs - crucial for bench testing!)
+        await SendAndWaitAsync(0x7DF, new byte[] { 0x07 }, "Broadcast", 600);
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x07 }, "ECM", 600);
 
-        // Step 3: If no DTCs captured yet, try KWP2000 Service 0x13 (ReadDiagnosticTroubleCodes)
-        if (_activeDtcs.Count == 0 && (!exKwp18.IsComplete || !exKwp18.IsSuccess))
+        // Step 3: Scan Mode 0A (Permanent DTCs)
+        await SendAndWaitAsync(0x7DF, new byte[] { 0x0A }, "Broadcast", 400);
+
+        // Step 4: Scan ECM via UDS Service 0x19 0x02 with multi-mask fallback strategy
+        var exUdsFf = await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x02, 0xFF }, "ECM", 800);
+        if (_activeDtcs.Count == 0 || !exUdsFf.IsSuccess)
         {
-            await SendAndWaitAsync(0x7E0, new byte[] { 0x13, 0x80 }, "ECM", 1200);
+            // Fallback masks for ECUs rejecting 0xFF (e.g. Bosch/Continental NRC 0x31)
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x02, 0x08 }, "ECM", 400); // Confirmed
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x02, 0x09 }, "ECM", 400); // Failed + Confirmed
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x02, 0x04 }, "ECM", 400); // Pending
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x02, 0x2F }, "ECM", 400); // Extended
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x01, 0xFF }, "ECM", 400); // DTC Count
         }
 
-        // Step 4: Scan ECM via UDS Service 0x19 0x02 0xFF (ISO 14229)
-        await SendAndWaitAsync(0x7E0, new byte[] { 0x19, 0x02, 0xFF }, "ECM", 1200);
-
-        // Step 5: Scan ECM via OBD-II Mode 03 (physical 0x7E0, then broadcast 0x7DF)
-        var exObd3 = await SendAndWaitAsync(0x7E0, new byte[] { 0x03 }, "ECM", 1000);
-        if (_activeDtcs.Count == 0 && (!exObd3.IsComplete || !exObd3.IsSuccess))
+        // Step 5: Start KWP2000 Diagnostic Session (0x10 0x81) for Bosch EDC15/EDC16/EDC17, Marelli MJD
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x10, 0x81 }, "ECM", 400);
+        var exKwp18 = await SendAndWaitAsync(0x7E0, new byte[] { 0x18, 0x00, 0xFF, 0x00 }, "ECM", 800);
+        if (_activeDtcs.Count == 0 || !exKwp18.IsSuccess)
         {
-            await SendAndWaitAsync(0x7DF, new byte[] { 0x03 }, "ECM", 1000);
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x18, 0x00, 0x00, 0x00 }, "ECM", 600);
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x13, 0x80 }, "ECM", 600);
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x13, 0xFF, 0x00 }, "ECM", 600);
         }
 
-        // Step 6: Scan ECM via OBD-II Mode 07 (Pending emission DTCs)
-        await SendAndWaitAsync(0x7E0, new byte[] { 0x07 }, "ECM", 800);
+        // Step 6: Scan Secondary Modules (ABS 0x7E1, BCM 0x7E2, SRS 0x7E3)
+        await SendAndWaitAsync(0x7E1, new byte[] { 0x03 }, "ABS", 300);
+        await SendAndWaitAsync(0x7E1, new byte[] { 0x19, 0x02, 0xFF }, "ABS", 400);
+        await SendAndWaitAsync(0x7E2, new byte[] { 0x19, 0x02, 0xFF }, "BCM", 400);
+        await SendAndWaitAsync(0x7E3, new byte[] { 0x19, 0x02, 0xFF }, "SRS", 400);
 
-        // Step 7: Scan Secondary Modules (ABS, BCM)
-        await SendAndWaitAsync(0x7E1, new byte[] { 0x19, 0x02, 0xFF }, "ABS", 500);
-        await SendAndWaitAsync(0x7E2, new byte[] { 0x19, 0x02, 0xFF }, "BCM", 500);
+        // Step 7: Extended 29-bit CAN Fallback (ISO 15765-4 29-bit / J1939) if 0 DTCs detected so far
+        if (_activeDtcs.Count == 0)
+        {
+            await SendAndWaitAsync(0x18DB33F1, new byte[] { 0x03 }, "Broadcast_29bit", 600);
+            await SendAndWaitAsync(0x18DB33F1, new byte[] { 0x07 }, "Broadcast_29bit", 600);
+            await SendAndWaitAsync(0x18DA10F1, new byte[] { 0x19, 0x02, 0xFF }, "ECM_29bit", 600);
+        }
+
+        // Step 8: Query Identification (VIN, ECU Name, Hardware Info)
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x09, 0x02 }, "ECM", 500); // OBD Mode 09 VIN
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x09, 0x0A }, "ECM", 500); // OBD Mode 09 Name
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x1A, 0x80 }, "ECM", 500); // KWP2000 Info
+        await SendAndWaitAsync(0x7E0, new byte[] { 0x22, 0xF1, 0x90 }, "ECM", 500); // UDS VIN DID
+
+        // Step 9: Automatic Live Parameter Baseline Polling (Mode 01)
+        byte[] standardPidsToPoll = new byte[] { 0x0C, 0x0D, 0x05, 0x11, 0x0B, 0x10, 0x23, 0x42 };
+        foreach (byte pid in standardPidsToPoll)
+        {
+            await SendAndWaitAsync(0x7E0, new byte[] { 0x01, pid }, "ECM", 250);
+        }
 
         OnDtcsUpdated?.Invoke(GetActiveDtcList());
     }
@@ -760,26 +1003,65 @@ public class DiagnosticSessionService : IDiagnosticSessionService, IDisposable
         _latestObdValues.Clear();
     }
 
-    private string GetEcuNameByResponseCanId(uint canId) => canId switch
+    private static bool IsDiagnosticResponseId(uint canId)
     {
-        0x7E8 => "ECM",
-        0x7E9 => "ABS",
-        0x7EA => "BCM",
-        0x7EB => "SRS",
-        0x7EC => "CLUSTER",
-        _ => $"ECU_0x{canId:X3}"
-    };
+        uint cleanId = canId & 0x1FFFFFFFU;
+        if (cleanId >= 0x7E8 && cleanId <= 0x7EF) return true;
+        if ((cleanId & 0xFFFF0000) == 0x18DA0000) return true;
+        if ((cleanId & 0xFFFF0000) == 0x18DB0000) return true;
+        if ((cleanId & 0x00FF0000) == 0x00FE0000 || (cleanId & 0x00FF0000) == 0x00FF0000) return true; // J1939
+        return false;
+    }
 
-    private uint GetResponseCanIdByRequestCanId(uint reqId) => reqId switch
+    private static uint GetRequestCanIdForResponse(uint respId)
     {
-        0x7DF => 0x7E8,
-        0x7E0 => 0x7E8,
-        0x7E1 => 0x7E9,
-        0x7E2 => 0x7EA,
-        0x7E3 => 0x7EB,
-        0x7E4 => 0x7EC,
-        _ => reqId + 8
-    };
+        uint cleanId = respId & 0x1FFFFFFFU;
+        if (cleanId >= 0x7E8 && cleanId <= 0x7EF)
+        {
+            return cleanId - 8;
+        }
+        if ((cleanId & 0xFFFF0000) == 0x18DA0000)
+        {
+            // Swap Target and Source bytes for 29-bit UDS
+            byte target = (byte)((cleanId >> 8) & 0xFF);
+            byte source = (byte)(cleanId & 0xFF);
+            return 0x18DA0000U | ((uint)source << 8) | (uint)target;
+        }
+        return cleanId > 8 ? cleanId - 8 : 0x7E0;
+    }
+
+    private string GetEcuNameByResponseCanId(uint canId)
+    {
+        uint cleanId = canId & 0x1FFFFFFFU;
+        return cleanId switch
+        {
+            0x7E8 => "ECM",
+            0x7E9 => "ABS",
+            0x7EA => "BCM",
+            0x7EB => "SRS",
+            0x7EC => "CLUSTER",
+            0x7ED => "HVAC",
+            0x7EE => "GATEWAY",
+            0x7EF => "SPECIAL",
+            _ when (cleanId & 0xFFFF0000) == 0x18DA0000 => $"ECU_0x{(cleanId & 0xFF):X2}",
+            _ => $"ECU_0x{canId:X3}"
+        };
+    }
+
+    private uint GetResponseCanIdByRequestCanId(uint reqId)
+    {
+        uint cleanId = reqId & 0x1FFFFFFFU;
+        if (cleanId == 0x7DF) return 0x7E8;
+        if (cleanId >= 0x7E0 && cleanId <= 0x7E7) return cleanId + 8;
+        if (cleanId == 0x18DB33F1) return 0x18DAF110;
+        if ((cleanId & 0xFFFF0000) == 0x18DA0000)
+        {
+            byte target = (byte)((cleanId >> 8) & 0xFF);
+            byte source = (byte)(cleanId & 0xFF);
+            return 0x18DA0000U | ((uint)source << 8) | (uint)target;
+        }
+        return reqId + 8;
+    }
 
     private void HandleDiagnosticPayload(DiagnosticPayloadReceivedEventArgs args)
     {

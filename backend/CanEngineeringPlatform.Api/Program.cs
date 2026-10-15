@@ -238,4 +238,9 @@ if (Directory.Exists(distPath) && File.Exists(Path.Combine(distPath, "index.html
     });
 }
 
+// Eagerly activate live stream and diagnostic services at startup
+app.Services.GetRequiredService<ILiveEcuDataService>();
+app.Services.GetRequiredService<IDiagnosticSessionService>();
+app.Services.GetRequiredService<IEcuIdentificationService>();
+
 app.Run();

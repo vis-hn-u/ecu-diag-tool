@@ -46,7 +46,26 @@ public static class DtcDecoder
         { "P0102", "MAF SENSOR CIRCUIT LOW (Mass Air Flow Sensor A Circuit Low Input / Open)" },
         { "P1832", "4WD TRANSFER CASE SHIFT SYSTEM (4WD Transfer Case Shift Motor / Neutral Switch Malfunction)" },
         { "P1792", "BAROMETRIC SENSOR / TCU CAN TIMEOUT (Atmospheric Pressure Sensor Circuit Plausibility)" },
-        { "P0341", "CAMSHAFT SENSOR CIRCUIT RANGE/PERF (Camshaft Position Sensor A Circuit Signal Synchronization)" }
+        { "P0341", "CAMSHAFT SENSOR CIRCUIT RANGE/PERF (Camshaft Position Sensor A Circuit Signal Synchronization)" },
+
+        // Bosch EDC17 / MEDC17 Common Rail Diesel & Bench Diagnostic DTCs
+        { "P268C", "CYLINDER 1 INJECTOR CALIBRATION (Cylinder 1 Fuel Injector Calibration Offset / Not Programmed)" },
+        { "P268E", "CYLINDER 2 INJECTOR CALIBRATION (Cylinder 2 Fuel Injector Calibration Offset / Not Programmed)" },
+        { "P268F", "CYLINDER 3 INJECTOR CALIBRATION (Cylinder 3 Fuel Injector Calibration Offset / Not Programmed)" },
+        { "P268D", "CYLINDER 4 INJECTOR CALIBRATION (Cylinder 4 Fuel Injector Calibration Offset / Not Programmed)" },
+        { "P2128", "APP SENSOR 2 CIRCUIT HIGH (Throttle/Pedal Position Sensor/Switch 'E' Circuit High Input)" },
+        { "P2122", "APP SENSOR 1 CIRCUIT LOW (Throttle/Pedal Position Sensor/Switch 'D' Circuit Low Input)" },
+        { "P2127", "APP SENSOR 2 CIRCUIT LOW (Throttle/Pedal Position Sensor/Switch 'E' Circuit Low Input)" },
+        { "P0122", "THROTTLE POSITION CIRCUIT LOW (Throttle/Pedal Position Sensor/Switch 'A' Circuit Low Input)" },
+        { "P0222", "THROTTLE POSITION CIRCUIT LOW (Throttle/Pedal Position Sensor/Switch 'B' Circuit Low Input)" },
+        { "P0103", "MAF SENSOR CIRCUIT HIGH (Mass or Volume Air Flow Sensor 'A' Circuit High Input)" },
+        { "P0107", "MAP SENSOR CIRCUIT LOW (Manifold Absolute Pressure/Barometric Pressure Circuit Low Input)" },
+        { "P0118", "ECT SENSOR CIRCUIT HIGH (Engine Coolant Temperature Sensor 1 Circuit High Input)" },
+        { "P007D", "CHARGE AIR COOLER TEMP HIGH (Charge Air Cooler Temperature Sensor Circuit High Bank 1)" },
+        { "P0238", "BOOST PRESSURE SENSOR HIGH (Turbocharger/Supercharger Boost Sensor 'A' Circuit High)" },
+        { "P226A", "WATER IN FUEL SENSOR HIGH (Water in Fuel Sensor Circuit High / Out of Range)" },
+        { "P170F", "CLUTCH/NEUTRAL SWITCH PLAUSIBILITY (Transmission Clutch/Neutral Switch Circuit Malfunction)" },
+        { "P0336", "CRANKSHAFT SENSOR RANGE/PERF (Crankshaft Position Sensor 'A' Circuit Range/Performance)" }
     };
 
     public static List<DiagnosticTroubleCode> ParseUds0x19Response(byte[] payload, string ecuName = "ECU", uint canId = 0x7E8)

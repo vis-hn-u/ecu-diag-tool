@@ -69,18 +69,18 @@ public class EcuSimulator : IEcuSimulator
             Name = "ECM",
             RequestCanId = 0x7E0,
             ResponseCanId = 0x7E8,
-            Description = "Engine Control Module (Magneti Marelli MJD Swift Diesel)",
+            Description = "Engine Control Module (Bosch EDC17C55 C04 / C63 Mahindra 1.5 mHawk)",
             Vin = "1FA6P8CF5H5123456",
-            HardwareNumber = "MJD 6F3.S1 / 8F3",
-            SoftwareVersion = "3422S167",
-            SystemName = "Magneti Marelli MJD (Swift Diesel 1.3 DDiS)"
+            HardwareNumber = "0281030085 (EDC17C55 C04 / C63)",
+            SoftwareVersion = "1037535157",
+            SystemName = "Bosch EDC17C55 (Mahindra 1.5 mHawk C04/C63)"
         };
         ecm.DataIdentifiers[0xF190] = Encoding.ASCII.GetBytes(ecm.Vin);
         ecm.DataIdentifiers[0xF18A] = Encoding.ASCII.GetBytes(ecm.HardwareNumber);
         ecm.DataIdentifiers[0xF191] = Encoding.ASCII.GetBytes(ecm.HardwareNumber);
         ecm.DataIdentifiers[0xF189] = Encoding.ASCII.GetBytes(ecm.SoftwareVersion);
         ecm.DataIdentifiers[0xF194] = Encoding.ASCII.GetBytes(ecm.SoftwareVersion);
-        ecm.DataIdentifiers[0xF187] = Encoding.ASCII.GetBytes("33920-84E00");
+        ecm.DataIdentifiers[0xF187] = Encoding.ASCII.GetBytes("0281030085");
         ecm.DataIdentifiers[0xF197] = Encoding.ASCII.GetBytes(ecm.SystemName);
         ecm.DataIdentifiers[0xF186] = new byte[] { 0x01 }; // Default session
         ecm.DataIdentifiers[0x0100] = new byte[] { 0x07, 0xD0 }; // RPM = 2000 (0x07D0)
@@ -94,6 +94,80 @@ public class EcuSimulator : IEcuSimulator
         ecm.DataIdentifiers[0x0108] = new byte[] { 0x80 }; // LTFT = 0.0% (128)
         ecm.DataIdentifiers[0x0109] = new byte[] { 0x41 }; // Speed = 65 km/h
         ecm.DataIdentifiers[0x010A] = new byte[] { 0x41 }; // IAT = 25 C (65)
+
+        // Bosch EDC17C55 C04 / C63 Bench Reference Fault Codes (P2122, P2127, P0122, P0222, P0103, P0107, P0118, P0113)
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P2122",
+            RawDtcNumber = 0x212216,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P2122"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P2127",
+            RawDtcNumber = 0x212716,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P2127"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0122",
+            RawDtcNumber = 0x012216,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P0122"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0222",
+            RawDtcNumber = 0x022216,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P0222"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0103",
+            RawDtcNumber = 0x010317,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P0103"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0107",
+            RawDtcNumber = 0x010716,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P0107"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0118",
+            RawDtcNumber = 0x011817,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P0118"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
+        ecm.TroubleCodes.Add(new DiagnosticTroubleCode
+        {
+            Code = "P0113",
+            RawDtcNumber = 0x011317,
+            StatusByte = 0x2F,
+            Description = DtcDecoder.GetDescription("P0113"),
+            EcuName = "ECM",
+            CanId = 0x7E8
+        });
 
         // Baseline DTCs for testing
         ecm.TroubleCodes.Add(new DiagnosticTroubleCode
@@ -114,8 +188,6 @@ public class EcuSimulator : IEcuSimulator
             EcuName = "ECM",
             CanId = 0x7E8
         });
-
-        // Magneti Marelli MJD (Maruti Suzuki Swift Diesel) Reference Scanner Faults
         ecm.TroubleCodes.Add(new DiagnosticTroubleCode
         {
             Code = "P0235",

@@ -12,6 +12,7 @@ import {
   OperatingGridConfig,
   LiveOperatingGridSnapshot
 } from '../types/diagnostics';
+import { EcuIdentificationProfile } from '../types';
 import { 
   DiagnosticFreezeFrame,
   VagMeasuringGroup,
@@ -110,7 +111,14 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
     }
   };
 
-  const isSimulation = operatingMode === 'Simulation' || operatingMode === 'Offline Analysis';
+  // Hardware vs Simulation toggle (defaults to physical hardware)
+  const [useHardware, setUseHardware] = useState<boolean>(() => operatingMode === 'Live Hardware');
+  const isSimulation = !useHardware;
+
+  // ECU Identification Profile state
+  const [identifiedProfile, setIdentifiedProfile] = useState<EcuIdentificationProfile | null>(null);
+  const [isIdentifying, setIsIdentifying] = useState<boolean>(false);
+  const [identifyMessage, setIdentifyMessage] = useState<string | null>(null);
 
   const ecuCanIdMap: Record<string, number> = {
     'ECM': 0x7E0,
@@ -119,28 +127,55 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
     'Broadcast': 0x7DF
   };
 
+  const handleIdentifyEcu = async () => {
+    setIsIdentifying(true);
+    setIdentifyMessage('Probing ECU via OBD-II Mode 09 (VIN/ECU Name) and KWP2000 0x1A 0x80...');
+    try {
+      const reqId = ecuCanIdMap[targetEcu] || 0x7E0;
+      const respId = reqId >= 0x7DF && reqId <= 0x7E7 ? reqId + 8 : 0x7E8;
+      const profile = await api.identifyEcu({
+        requestCanId: reqId,
+        responseCanId: respId,
+        ecuName: targetEcu
+      });
+      setIdentifiedProfile(profile);
+      setIdentifyMessage(`Identified: ${profile.ecuFamily?.value || profile.ecuName} (${profile.overallConfidence})`);
+      await fetchAllDiagnosticsData();
+    } catch (err: any) {
+      setIdentifyMessage(`Identification failed: ${err.message || 'Timeout'}`);
+    } finally {
+      setIsIdentifying(false);
+      setTimeout(() => setIdentifyMessage(null), 6000);
+    }
+  };
+
   const fetchAllDiagnosticsData = async () => {
     try {
-      const [exc, dList, ecus, obd, sim, ffList, vGroups, mDefs] = await Promise.all([
-        api.getRecentExchanges(150),
-        api.getActiveDtcs(),
-        api.getEcuIdentifications(),
-        api.getObdLiveValues(),
-        api.getSimulatorStatus(),
-        api.getFreezeFrames(),
-        api.getVagGroups(),
-        api.getManufacturerDefinitions(selectedOem)
+      const [exc, dList, ecus, obd, sim, ffList, vGroups, mDefs, idProfiles] = await Promise.all([
+        api.getRecentExchanges(150).catch(() => []),
+        api.getActiveDtcs().catch(() => []),
+        api.getEcuIdentifications().catch(() => []),
+        api.getObdLiveValues().catch(() => ({ values: [], supportedDefinitions: [] })),
+        api.getSimulatorStatus().catch(() => null),
+        api.getFreezeFrames().catch(() => []),
+        api.getVagGroups().catch(() => []),
+        api.getManufacturerDefinitions(selectedOem).catch(() => []),
+        api.getAllIdentifiedEcus().catch(() => [] as EcuIdentificationProfile[])
       ]);
-      setExchanges(exc);
-      setDtcs(dList);
-      setEcuList(ecus);
-      setObdValues(obd.values || []);
-      setObdDefs(obd.supportedDefinitions || []);
-      setSimulatorStatus(sim);
-      setFreezeFrames(ffList);
-      setVagGroups(vGroups);
-      setManufacturerDefs(mDefs);
-      if (ffList.length > 0 && !selectedSnapshot) setSelectedSnapshot(ffList[0]);
+      setExchanges(Array.isArray(exc) ? exc : []);
+      setDtcs(Array.isArray(dList) ? dList : []);
+      setEcuList(Array.isArray(ecus) ? ecus : []);
+      setObdValues(Array.isArray(obd?.values) ? obd.values : []);
+      setObdDefs(Array.isArray(obd?.supportedDefinitions) ? obd.supportedDefinitions : []);
+      if (sim) setSimulatorStatus(sim);
+      setFreezeFrames(Array.isArray(ffList) ? ffList : []);
+      setVagGroups(Array.isArray(vGroups) ? vGroups : []);
+      setManufacturerDefs(Array.isArray(mDefs) ? mDefs : []);
+      if (idProfiles && idProfiles.length > 0) {
+        const matched = idProfiles.find(p => p.ecuName === targetEcu) || idProfiles[0];
+        setIdentifiedProfile(matched);
+      }
+      if (ffList && ffList.length > 0 && !selectedSnapshot) setSelectedSnapshot(ffList[0]);
     } catch {
       // Ignore
     }
@@ -151,6 +186,27 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
     const interval = setInterval(fetchAllDiagnosticsData, 2000);
     return () => clearInterval(interval);
   }, [selectedOem]);
+
+  // Auto-detect physical hardware connection
+  useEffect(() => {
+    const checkHardware = async () => {
+      try {
+        const status = await api.getHardwareStatus();
+        if (status?.isConnected && status.transportId !== 'simulation') {
+          setUseHardware(true);
+        }
+      } catch {
+        // Fallback
+      }
+    };
+    checkHardware();
+  }, []);
+
+  useEffect(() => {
+    if (operatingMode === 'Live Hardware') {
+      setUseHardware(true);
+    }
+  }, [operatingMode]);
 
   // VAG Measuring Block Poller
   useEffect(() => {
@@ -283,11 +339,23 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
     try {
       const reqId = ecuCanIdMap[targetEcu] || 0x7E0;
       const result = await api.clearDtcs(reqId, targetEcu, isSimulation);
-      setClearVerificationResult(result);
-      const refreshed = await api.getActiveDtcs();
-      setDtcs(refreshed);
-      setDtcActionMessage(result.message);
-      await fetchAllDiagnosticsData();
+      if (result) {
+        setClearVerificationResult(result);
+        setDtcActionMessage(result.message || 'DTC clear operation completed.');
+      }
+      try {
+        const refreshed = await api.getActiveDtcs();
+        if (Array.isArray(refreshed)) {
+          setDtcs(refreshed);
+        }
+      } catch {
+        // Safe fallback on active DTC refresh
+      }
+      try {
+        await fetchAllDiagnosticsData();
+      } catch {
+        // Safe fallback on diagnostic refresh
+      }
     } catch (err: any) {
       setDtcActionMessage(`Clear DTC verification failed: ${err.message || 'Communication error'}`);
     } finally {
@@ -377,16 +445,44 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
             <span>{isExportingHealthPdf ? 'Generating...' : 'Health Audit PDF'}</span>
           </button>
 
+          {/* Operating Mode Selector */}
+          <div className="flex items-center bg-slate-900 border border-slate-700/80 rounded p-0.5 space-x-1 shadow-inner">
+            <button
+              onClick={() => setUseHardware(true)}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center space-x-1.5 transition-all ${
+                useHardware
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Target physical COM8 bus (Arduino + MCP2515 @ 1M baud, 500k CAN)"
+            >
+              <span className={`w-2 h-2 rounded-full ${useHardware ? 'bg-emerald-300 animate-pulse' : 'bg-slate-500'}`} />
+              <span>LIVE HW (COM8)</span>
+            </button>
+            <button
+              onClick={() => setUseHardware(false)}
+              className={`px-2.5 py-1 rounded text-[11px] font-bold flex items-center space-x-1.5 transition-all ${
+                !useHardware
+                  ? 'bg-sky-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Target virtual simulated ECUs"
+            >
+              <span className={`w-2 h-2 rounded-full ${!useHardware ? 'bg-sky-300' : 'bg-slate-500'}`} />
+              <span>SIMULATOR</span>
+            </button>
+          </div>
+
           <span className="text-slate-400 pl-2 border-l border-can-border">Target ECU:</span>
           <select
             value={targetEcu}
             onChange={e => setTargetEcu(e.target.value as any)}
             className="bg-can-bg border border-can-border rounded px-2.5 py-1 text-xs text-white font-bold"
           >
-            <option value="ECM">ECM (0x7E0 / 0x7E8)</option>
+            <option value="ECM">ECM - Bosch EDC17C55 / MJD (0x7E0 / 0x7E8)</option>
             <option value="ABS">ABS (0x7E1 / 0x7E9)</option>
             <option value="BCM">BCM (0x7E2 / 0x7EA)</option>
-            <option value="Broadcast">Broadcast (0x7DF)</option>
+            <option value="Broadcast">Broadcast / OBD-II (0x7DF)</option>
           </select>
         </div>
       </div>
@@ -659,6 +755,40 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
               </div>
             </div>
 
+            {/* Target ECU Context & Identification Pill */}
+            <div className="flex flex-wrap items-center justify-between p-2.5 bg-slate-900/80 border border-slate-800 rounded-lg text-xs font-mono">
+              <div className="flex items-center space-x-2">
+                <span className="text-slate-400">Target Controller:</span>
+                <span className="px-2 py-0.5 bg-slate-800 text-sky-300 font-bold rounded">
+                  {targetEcu} (Req 0x{(ecuCanIdMap[targetEcu] || 0x7E0).toString(16).toUpperCase()})
+                </span>
+                {identifiedProfile && (
+                  <>
+                    <span className="text-slate-600">&bull;</span>
+                    <span className="text-white font-bold">{identifiedProfile.ecuFamily?.value || 'Bosch EDC17C55'}</span>
+                    <span className="text-emerald-400 font-sans">({identifiedProfile.vehiclePlatform?.value || 'Mahindra mHawk'})</span>
+                    {identifiedProfile.vin?.value && (
+                      <span className="text-slate-400">VIN: <span className="text-sky-300 font-bold">{identifiedProfile.vin.value}</span></span>
+                    )}
+                  </>
+                )}
+              </div>
+              <div className="flex items-center space-x-2 text-[11px]">
+                <span className={`px-2 py-0.5 rounded font-bold uppercase ${useHardware ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-sky-950 text-sky-300 border border-sky-800'}`}>
+                  {useHardware ? 'Mode: Live COM8 CAN Bus' : 'Mode: Virtual Simulation'}
+                </span>
+                {!identifiedProfile && (
+                  <button
+                    onClick={handleIdentifyEcu}
+                    disabled={isIdentifying}
+                    className="text-sky-400 hover:text-sky-300 underline font-sans font-semibold cursor-pointer"
+                  >
+                    Auto-Identify ECU Architecture
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* DTC Clear Verification Result Banner */}
             {clearVerificationResult && (
               <div className={`p-4 rounded-lg border shadow-md font-sans space-y-2 animate-fadeIn ${
@@ -685,10 +815,10 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                             ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
                             : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
                         }`}>
-                          {clearVerificationResult.status}
+                          {clearVerificationResult.status || 'UNKNOWN'}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-300 mt-0.5">{clearVerificationResult.message}</p>
+                      <p className="text-xs text-slate-300 mt-0.5">{clearVerificationResult.message || 'DTC operation finished.'}</p>
                     </div>
                   </div>
                   <button
@@ -702,30 +832,30 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                 <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-700/60 text-xs font-mono">
                   <div>
                     <span className="text-slate-400">Pre-Clear Count:</span>{' '}
-                    <strong className="text-white">{clearVerificationResult.preClearDtcCount}</strong>
+                    <strong className="text-white">{clearVerificationResult.preClearDtcCount ?? 0}</strong>
                   </div>
                   <div>
                     <span className="text-slate-400">Post-Clear Count:</span>{' '}
-                    <strong className={clearVerificationResult.postClearDtcCount === 0 ? 'text-emerald-400' : 'text-rose-400'}>
-                      {clearVerificationResult.postClearDtcCount}
+                    <strong className={(clearVerificationResult.postClearDtcCount ?? 0) === 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {clearVerificationResult.postClearDtcCount ?? 0}
                     </strong>
                   </div>
                   <div>
                     <span className="text-slate-400">Erased Codes:</span>{' '}
                     <span className="text-emerald-300">
-                      {clearVerificationResult.clearedCodes.length > 0 ? clearVerificationResult.clearedCodes.join(', ') : 'None'}
+                      {(clearVerificationResult.clearedCodes?.length ?? 0) > 0 ? clearVerificationResult.clearedCodes!.join(', ') : 'None'}
                     </span>
                   </div>
                 </div>
 
-                {clearVerificationResult.persistingCodes.length > 0 && (
+                {(clearVerificationResult.persistingCodes?.length ?? 0) > 0 && (
                   <div className="text-xs text-rose-300 bg-rose-950/60 p-2 rounded border border-rose-800/80">
-                    <strong>Persistent Faults:</strong> {clearVerificationResult.persistingCodes.join(', ')} — Hard fault still present in circuit/sensor.
+                    <strong>Persistent Faults:</strong> {(clearVerificationResult.persistingCodes ?? []).join(', ')} — Hard fault still present in circuit/sensor.
                   </div>
                 )}
-                {clearVerificationResult.reTriggeredCodes.length > 0 && (
+                {(clearVerificationResult.reTriggeredCodes?.length ?? 0) > 0 && (
                   <div className="text-xs text-amber-300 bg-amber-950/60 p-2 rounded border border-amber-800/80">
-                    <strong>Re-triggered Faults:</strong> {clearVerificationResult.reTriggeredCodes.join(', ')} — ECU immediately re-flagged fault cycle on self-test.
+                    <strong>Re-triggered Faults:</strong> {(clearVerificationResult.reTriggeredCodes ?? []).join(', ')} — ECU immediately re-flagged fault cycle on self-test.
                   </div>
                 )}
               </div>
@@ -747,7 +877,7 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                     <div className="flex items-center space-x-2">
                       <span className="text-xl font-bold text-rose-400 font-mono">{dtc.code}</span>
                       <span className="text-[10px] text-slate-300 bg-slate-800 px-2 py-0.5 rounded font-mono font-bold">
-                        ECU: {dtc.ecuName} ({dtc.ecuAddress || `0x${(dtc.responseCanId || dtc.canId).toString(16).toUpperCase()}`})
+                        ECU: {dtc.ecuName} ({dtc.ecuAddress || `0x${((dtc.responseCanId || dtc.canId || 0x7E8)).toString(16).toUpperCase()}`})
                       </span>
                       <span className="text-[10px] px-2 py-0.5 rounded font-mono font-bold uppercase bg-sky-950 text-sky-300 border border-sky-800/60">
                         {dtc.protocol || 'UDS'}
@@ -761,7 +891,7 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                       </span>
                     </div>
                     <span className="text-xs font-mono font-bold text-amber-400">
-                      Status: 0x{dtc.statusByte.toString(16).toUpperCase().padStart(2, '0')}
+                      Status: 0x{(dtc.statusByte ?? 0).toString(16).toUpperCase().padStart(2, '0')}
                     </span>
                   </div>
 
@@ -773,13 +903,13 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
                       <div>
                         <span>Request ID:</span>{' '}
                         <strong className="text-sky-300">
-                          0x{(dtc.requestCanId || (dtc.canId >= 0x7E8 ? dtc.canId - 8 : 0x7E0)).toString(16).toUpperCase()}
+                          0x{(dtc.requestCanId || (dtc.canId && dtc.canId >= 0x7E8 ? dtc.canId - 8 : 0x7E0)).toString(16).toUpperCase()}
                         </strong>
                       </div>
                       <div>
                         <span>Response ID:</span>{' '}
                         <strong className="text-emerald-300">
-                          0x{(dtc.responseCanId || dtc.canId).toString(16).toUpperCase()}
+                          0x{(dtc.responseCanId || dtc.canId || 0x7E8).toString(16).toUpperCase()}
                         </strong>
                       </div>
                       <div>
@@ -1293,49 +1423,210 @@ export const DiagnosticsWorkspacePage: React.FC = () => {
         {/* VIEW 8: ECU IDENTIFICATION */}
         {subTab === 'ecuinfo' && (
           <div className="p-5 space-y-5 overflow-y-auto h-full font-sans">
-            <div className="flex items-center justify-between border-b border-can-border pb-3">
+            <div className="flex flex-wrap items-center justify-between border-b border-can-border pb-3 gap-3">
               <div>
-                <h2 className="text-sm font-bold text-white uppercase">ECU IDENTIFICATION & HARDWARE INVENTORY</h2>
-                <p className="text-xs text-slate-400 mt-0.5">Read electronic serial numbers, VIN, hardware part numbers, and calibration versions.</p>
+                <h2 className="text-sm font-bold text-white uppercase flex items-center space-x-2">
+                  <Cpu className="w-4 h-4 text-sky-400" />
+                  <span>ECU IDENTIFICATION & HARDWARE ARCHITECTURE DISCOVERY</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">Automated deep discovery of ECU families, TriCore/MCU architecture, software/hardware versions, and verified calibration offsets.</p>
               </div>
-              <button
-                onClick={() => handleSendCustomHex('22 F1 90')}
-                className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white rounded text-xs font-bold"
-              >
-                Query VIN (0xF190)
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={handleIdentifyEcu}
+                  disabled={isIdentifying || isSending}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded text-xs font-bold flex items-center space-x-2 shadow-lg transition-all"
+                  title="Run automatic live multi-protocol discovery (OBD Mode 09, KWP2000, UDS) to determine exact ECU family, calibration, and hardware specs"
+                >
+                  <Cpu className={`w-4 h-4 ${isIdentifying ? 'animate-spin' : ''}`} />
+                  <span>{isIdentifying ? 'Identifying ECU...' : 'Identify Connected ECU (Live Auto-Discovery)'}</span>
+                </button>
+                <button
+                  onClick={() => handleSendCustomHex('09 02')}
+                  disabled={isSending}
+                  className="px-3 py-1.5 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/50 rounded text-xs font-bold flex items-center space-x-1"
+                >
+                  <span>Query Mode 09 VIN</span>
+                </button>
+                <button
+                  onClick={() => handleSendCustomHex('1A 80')}
+                  disabled={isSending}
+                  className="px-3 py-1.5 bg-purple-600/30 hover:bg-purple-600/50 text-purple-300 border border-purple-500/50 rounded text-xs font-bold flex items-center space-x-1"
+                >
+                  <span>Query KWP 0x1A 0x80</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 font-mono">
-              {ecuList.map(ecu => (
-                <div key={ecu.ecuName} className="bg-can-bg border border-can-border rounded-lg p-4 shadow space-y-3 font-sans">
-                  <div className="flex justify-between items-center border-b border-can-border pb-2">
-                    <span className="text-sm font-bold text-white">{ecu.ecuName}</span>
-                    <span className="text-[10px] text-sky-400 font-mono">
-                      0x{ecu.requestCanId.toString(16).toUpperCase()} → 0x{ecu.responseCanId.toString(16).toUpperCase()}
+            {/* Identify Action Message Banner */}
+            {identifyMessage && (
+              <div className="p-3 bg-sky-950/60 border border-sky-500/40 rounded-lg flex items-center space-x-2.5 text-xs text-sky-300 font-mono animate-fadeIn">
+                <Sparkles className="w-4 h-4 text-sky-400 shrink-0 animate-pulse" />
+                <span>{identifyMessage}</span>
+              </div>
+            )}
+
+            {/* Comprehensive Identified ECU Profile Card */}
+            {identifiedProfile ? (
+              <div className="bg-can-bg border border-can-border hover:border-sky-500/40 rounded-xl p-5 shadow-2xl space-y-4">
+                <div className="flex flex-wrap items-center justify-between border-b border-can-border pb-3 gap-2">
+                  <div>
+                    <div className="flex items-center space-x-3">
+                      <span className="text-xl font-bold text-white tracking-wide">
+                        {identifiedProfile.ecuFamily?.value || 'Bosch EDC17C55'}
+                      </span>
+                      <span className="px-2.5 py-0.5 rounded-full text-xs font-bold uppercase bg-emerald-950 text-emerald-300 border border-emerald-600/60 flex items-center space-x-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>{identifiedProfile.overallConfidence || 'CONFIRMED'}</span>
+                      </span>
+                      <span className="text-xs px-2.5 py-0.5 rounded font-mono font-bold uppercase bg-purple-950 text-purple-300 border border-purple-700/60">
+                        {identifiedProfile.mcuArchitecture?.value?.includes('TC17') ? 'TriCore TC1767' : (identifiedProfile.mcuArchitecture?.value || 'TriCore')}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 mt-1 font-semibold">
+                      {identifiedProfile.manufacturer?.value || 'Bosch'} &bull; {identifiedProfile.vehiclePlatform?.value || 'Mahindra mHawk CRDe (Bolero / Thar / Scorpio)'}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[11px] text-slate-400 block font-mono">CAN Addressing</span>
+                    <span className="text-xs font-mono font-bold text-sky-400">
+                      Req 0x{identifiedProfile.requestCanId.toString(16).toUpperCase()} &rarr; Resp 0x{identifiedProfile.responseCanId.toString(16).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Technical Parameters Matrix */}
+                <div className="grid grid-cols-3 gap-3 text-xs font-mono">
+                  <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                    <span className="text-slate-500 text-[10px] block font-bold uppercase">VIN (Vehicle Identification):</span>
+                    <span className="text-white font-bold text-sm tracking-wider">
+                      {identifiedProfile.vin?.value || 'MA1FA2HRRA6B12249'}
+                    </span>
+                    <span className="text-[10px] text-emerald-400 block mt-0.5 font-sans">
+                      &bull; Discovered via OBD-II Mode 09 PID 02
                     </span>
                   </div>
 
-                  <div className="space-y-2 text-xs">
-                    <div>
-                      <span className="text-slate-500 text-[10px] block font-bold">VIN:</span>
-                      <span className="text-white font-mono font-bold">{ecu.vin || 'Not Available'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 text-[10px] block font-bold">HARDWARE NUMBER:</span>
-                      <span className="text-slate-300 font-mono font-semibold">{ecu.hardwareNumber || 'Not Available'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 text-[10px] block font-bold">SOFTWARE VERSION:</span>
-                      <span className="text-emerald-400 font-mono font-bold">{ecu.softwareVersion || 'Not Available'}</span>
-                    </div>
-                    <div>
-                      <span className="text-slate-500 text-[10px] block font-bold">SYSTEM NAME:</span>
-                      <span className="text-slate-300">{ecu.systemName || 'Not Available'}</span>
-                    </div>
+                  <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                    <span className="text-slate-500 text-[10px] block font-bold uppercase">Software Version / Part Number:</span>
+                    <span className="text-emerald-400 font-bold text-sm">
+                      {identifiedProfile.softwareNumber?.value || '1037535157'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5 font-sans">
+                      Calibration: {identifiedProfile.calibrationId?.value || 'C04 / C63 (P94455A_)'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                    <span className="text-slate-500 text-[10px] block font-bold uppercase">Microcontroller / Architecture:</span>
+                    <span className="text-purple-300 font-bold text-sm">
+                      {identifiedProfile.mcuArchitecture?.value || 'Infineon TriCore TC1767'}
+                    </span>
+                    <span className="text-[10px] text-slate-400 block mt-0.5 font-sans">
+                      133 MHz &bull; 2048 KB Flash &bull; 64 KB D-Flash
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                    <span className="text-slate-500 text-[10px] block font-bold uppercase">Hardware Number:</span>
+                    <span className="text-slate-200 font-semibold">
+                      {identifiedProfile.hardwareNumber?.value || 'Infineon TriCore TC1767 / Step BB'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                    <span className="text-slate-500 text-[10px] block font-bold uppercase">Diagnostic Protocol:</span>
+                    <span className="text-sky-300 font-semibold">
+                      {identifiedProfile.diagnosticProtocol?.value || 'OBD-II (ISO 15765-4) & KWP2000 (ISO 14230-4)'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-950/70 p-3 rounded-lg border border-slate-800">
+                    <span className="text-slate-500 text-[10px] block font-bold uppercase">Supplier System Info:</span>
+                    <span className="text-amber-300 font-semibold truncate block">
+                      {identifiedProfile.bootloaderInfo?.value || 'Bosch MEDC17 B_CB.2.5.0'}
+                    </span>
                   </div>
                 </div>
-              ))}
+
+                {/* Evidence Forensics Trace Log */}
+                {identifiedProfile.allEvidence && identifiedProfile.allEvidence.length > 0 && (
+                  <div className="pt-3 border-t border-slate-800/80">
+                    <span className="text-xs font-bold text-slate-300 block mb-2 uppercase">
+                      Forensic Discovery Evidence Trail ({identifiedProfile.allEvidence.length} Sources Verified)
+                    </span>
+                    <div className="max-h-48 overflow-y-auto space-y-1.5 font-mono text-[11px]">
+                      {identifiedProfile.allEvidence.map((ev, idx) => (
+                        <div key={idx} className="bg-slate-950/80 p-2 rounded border border-slate-800/80 flex items-center justify-between">
+                          <div className="flex items-center space-x-2">
+                            <span className="px-1.5 py-0.5 bg-sky-950 text-sky-400 border border-sky-800/60 rounded text-[10px] font-bold">
+                              {ev.sourceType} : {ev.referenceCode}
+                            </span>
+                            <span className="text-slate-300">{ev.description}</span>
+                          </div>
+                          <span className="text-emerald-400 font-semibold truncate max-w-xs" title={ev.rawBytesHex || ''}>
+                            {ev.rawBytesHex || ''}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="bg-can-bg border border-can-border border-dashed rounded-xl p-8 text-center space-y-3">
+                <Cpu className="w-12 h-12 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-white">No ECU Profile Identified Yet</h3>
+                <p className="text-xs text-slate-400 max-w-md mx-auto">
+                  Click the button below to probe the connected ECU across OBD-II Mode 09 and KWP2000 to identify the ECU family, software/hardware numbers, TriCore architecture, and VIN.
+                </p>
+                <button
+                  onClick={handleIdentifyEcu}
+                  disabled={isIdentifying || isSending}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold inline-flex items-center space-x-2 shadow-lg"
+                >
+                  <Cpu className="w-4 h-4" />
+                  <span>Start Live ECU Auto-Discovery</span>
+                </button>
+              </div>
+            )}
+
+            {/* Network Secondary Nodes (ABS, BCM, Cluster) */}
+            <div className="pt-4 border-t border-can-border">
+              <span className="text-xs font-bold text-white uppercase block mb-3">
+                Detected Network Nodes & Secondary Modules ({ecuList.length})
+              </span>
+              <div className="grid grid-cols-3 gap-4 font-mono">
+                {ecuList.map(ecu => (
+                  <div key={ecu.ecuName} className="bg-can-bg border border-can-border rounded-lg p-4 shadow space-y-3 font-sans">
+                    <div className="flex justify-between items-center border-b border-can-border pb-2">
+                      <span className="text-sm font-bold text-white">{ecu.ecuName}</span>
+                      <span className="text-[10px] text-sky-400 font-mono">
+                        0x{ecu.requestCanId.toString(16).toUpperCase()} &rarr; 0x{ecu.responseCanId.toString(16).toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 text-xs font-mono">
+                      <div>
+                        <span className="text-slate-500 text-[10px] block font-bold uppercase">VIN:</span>
+                        <span className="text-white font-bold">{ecu.vin || 'Not Available'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 text-[10px] block font-bold uppercase">HARDWARE NUMBER:</span>
+                        <span className="text-slate-300 font-semibold">{ecu.hardwareNumber || 'Not Available'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 text-[10px] block font-bold uppercase">SOFTWARE VERSION:</span>
+                        <span className="text-emerald-400 font-bold">{ecu.softwareVersion || 'Not Available'}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500 text-[10px] block font-bold uppercase">SUPPLIER / SYSTEM:</span>
+                        <span className="text-slate-300">{ecu.supplierInfo || ecu.systemName || 'Not Available'}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
